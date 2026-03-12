@@ -1,0 +1,19 @@
+{
+  "name": "Compare Stocks",
+  "description": "Compare performance of multiple stocks side-by-side over a date range — percent change, volatility, highs/lows.",
+  "exampleQuery": "Compare AAPL, MSFT, and GOOGL from 01/01/2025 to today",
+  "sampleResponse": {
+    "summary": "Side-by-side comparison of AAPL, MSFT, and GOOGL in 2025.",
+    "market": "US",
+    "stockData": [
+      { "symbol": "AAPL", "name": "Apple Inc.", "currency": "USD", "exchange": "NASDAQ" },
+      { "symbol": "MSFT", "name": "Microsoft Corporation", "currency": "USD", "exchange": "NASDAQ" }
+    ],
+    "comparison": [
+      { "symbol": "AAPL", "startPrice": 243.50, "endPrice": 251.30, "percentChange": 3.2, "volatility": 2.1, "periodHigh": 260.00, "periodLow": 230.00 },
+      { "symbol": "MSFT", "startPrice": 420.47, "endPrice": 425.50, "percentChange": 1.2, "volatility": 1.8, "periodHigh": 468.00, "periodLow": 395.00 }
+    ],
+    "insights": ["AAPL outperformed MSFT by 2 percentage points in this period."],
+    "disclaimer": "This is not financial advice."
+  }
+}

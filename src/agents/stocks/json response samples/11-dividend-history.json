@@ -1,0 +1,22 @@
+{
+  "name": "Dividend History",
+  "description": "View historical dividend payments for a stock — ex-dates, amounts, and annual totals.",
+  "exampleQuery": "Show me Apple's dividend history",
+  "sampleResponse": {
+    "summary": "Apple paid 4 dividends in 2025, totaling $1.00 per share.",
+    "market": "US",
+    "stockData": [{ "symbol": "AAPL", "name": "Apple Inc.", "currency": "USD", "exchange": "NASDAQ" }],
+    "dividends": {
+      "symbol": "AAPL", "currency": "USD", "totalPayments": 4,
+      "dividends": [
+        { "date": "10/02/2025", "amount": 0.25 },
+        { "date": "12/05/2025", "amount": 0.25 },
+        { "date": "11/08/2025", "amount": 0.25 },
+        { "date": "10/11/2025", "amount": 0.25 }
+      ],
+      "annualSummary": [{ "year": 2025, "totalDividend": 1.00 }]
+    },
+    "insights": ["AAPL has maintained consistent quarterly dividends throughout 2025."],
+    "disclaimer": "This is not financial advice."
+  }
+}

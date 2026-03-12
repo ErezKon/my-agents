@@ -1,0 +1,12 @@
+{
+  "name": "Search TASE (Israeli Market)",
+  "description": "Search for Israeli securities on the Tel Aviv Stock Exchange by name or numeric TASE ID.",
+  "exampleQuery": "Search for Teva on the Tel Aviv exchange",
+  "sampleResponse": {
+    "summary": "Found 3 results for 'Teva' on TASE.",
+    "market": "Israeli",
+    "stockData": [{ "symbol": "1150283", "name": "Teva Pharmaceutical", "currency": "ILS", "exchange": "TASE" }],
+    "insights": ["TASE ID 1150283 is the primary listing for Teva on the Tel Aviv Stock Exchange."],
+    "disclaimer": "This is not financial advice."
+  }
+}

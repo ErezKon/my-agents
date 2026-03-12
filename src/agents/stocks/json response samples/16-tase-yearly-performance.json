@@ -1,0 +1,15 @@
+{
+  "name": "TASE Yearly Performance",
+  "description": "Get the yearly performance for an Israeli security from TASE — same as yearly performance but using TASE data.",
+  "exampleQuery": "How did TASE 1150283 perform in 2025?",
+  "sampleResponse": {
+    "summary": "Teva (TASE 1150283) gained 6.3% in 2025.",
+    "market": "Israeli",
+    "stockData": [{
+      "symbol": "1150283", "name": "Teva Pharmaceutical", "currency": "ILS", "exchange": "TASE",
+      "yearlyPerformance": { "year": 2025, "openDate": "02/01/2025", "openValue": 68.20, "closeDate": "31/12/2025", "closeValue": 72.50, "change": 4.30, "changePercent": 6.30 }
+    }],
+    "insights": ["Teva's TASE listing slightly underperformed the TA-125 index in 2025."],
+    "disclaimer": "This is not financial advice."
+  }
+}

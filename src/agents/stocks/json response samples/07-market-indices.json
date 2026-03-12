@@ -1,0 +1,16 @@
+{
+  "name": "Market Indices",
+  "description": "Get current quotes for major market indices — S&P 500 (^GSPC), NASDAQ (^IXIC), Dow Jones (^DJI), TA-35 (^TA35.TA), TA-125 (^TA125.TA). Pass \"all\" to see them all at once.",
+  "exampleQuery": "How are the major indices doing today?",
+  "sampleResponse": {
+    "summary": "US markets are mixed today. S&P 500 up 0.3%, NASDAQ down 0.1%.",
+    "market": "both",
+    "stockData": [],
+    "indices": [
+      { "symbol": "^GSPC", "name": "S&P 500", "price": 5950.25, "change": 18.40, "changePercent": 0.31, "dayHigh": 5965.00, "dayLow": 5930.00 },
+      { "symbol": "^IXIC", "name": "NASDAQ Composite", "price": 19250.80, "change": -15.20, "changePercent": -0.08, "dayHigh": 19300.00, "dayLow": 19180.00 }
+    ],
+    "insights": ["The S&P 500 is near all-time highs while tech lags slightly."],
+    "disclaimer": "This is not financial advice."
+  }
+}

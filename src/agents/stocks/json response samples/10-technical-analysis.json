@@ -1,0 +1,15 @@
+{
+  "name": "Technical Analysis",
+  "description": "Compute technical indicators for a stock — SMA(20), SMA(50), EMA(12), EMA(26), RSI(14), MACD (line, signal, histogram), and an overall trend signal (bullish/bearish/neutral).",
+  "exampleQuery": "Give me a technical analysis of AAPL",
+  "sampleResponse": {
+    "summary": "AAPL shows a bullish trend with RSI at 62 and price above SMA(50).",
+    "market": "US",
+    "stockData": [{ "symbol": "AAPL", "name": "Apple Inc.", "currency": "USD", "exchange": "NASDAQ" }],
+    "technicalIndicators": {
+      "symbol": "AAPL", "currentPrice": 251.30, "sma20": 248.50, "sma50": 240.10, "ema12": 249.80, "ema26": 245.20, "rsi14": 62.3, "macd": 4.60, "macdSignal": 3.80, "macdHistogram": 0.80, "trend": "bullish"
+    },
+    "insights": ["RSI is neutral (62), MACD histogram is positive — momentum is bullish.", "Price is well above SMA(50), confirming the uptrend."],
+    "disclaimer": "This is not financial advice."
+  }
+}

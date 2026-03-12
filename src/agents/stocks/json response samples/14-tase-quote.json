@@ -1,0 +1,15 @@
+{
+  "name": "TASE Quote",
+  "description": "Get the current quote for any Israeli security (stocks, bonds, ETFs) using its numeric TASE ID.",
+  "exampleQuery": "What's the current price of TASE security 1150283?",
+  "sampleResponse": {
+    "summary": "Teva (TASE 1150283) is trading at 72.50 ILS, up 1.8%.",
+    "market": "Israeli",
+    "stockData": [{
+      "symbol": "1150283", "name": "Teva Pharmaceutical", "currency": "ILS", "exchange": "TASE",
+      "quote": { "price": 72.50, "change": 1.28, "changePercent": 1.80, "previousClose": 71.22, "open": 71.50, "dayHigh": 73.00, "dayLow": 71.00, "volume": 5200000 }
+    }],
+    "insights": ["Teva is trading near its session high."],
+    "disclaimer": "This is not financial advice."
+  }
+}

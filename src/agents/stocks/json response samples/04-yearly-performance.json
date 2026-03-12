@@ -1,0 +1,15 @@
+{
+  "name": "Yearly Performance",
+  "description": "Get a stock's performance for a specific year — opening price on the first trading day vs closing price on the last trading day, with absolute and percentage change.",
+  "exampleQuery": "How did Dell perform in 2025?",
+  "sampleResponse": {
+    "summary": "Dell (DELL) gained 9.21% in 2025.",
+    "market": "US",
+    "stockData": [{
+      "symbol": "DELL", "name": "Dell Technologies Inc.", "currency": "USD", "exchange": "NYQ",
+      "yearlyPerformance": { "year": 2025, "openDate": "02/01/2025", "openValue": 115.26, "closeDate": "31/12/2025", "closeValue": 125.88, "change": 10.62, "changePercent": 9.21 }
+    }],
+    "insights": ["DELL outperformed the NYSE Composite in 2025."],
+    "disclaimer": "This is not financial advice."
+  }
+}

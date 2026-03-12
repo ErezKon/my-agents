@@ -1,0 +1,16 @@
+{
+  "name": "Stock News",
+  "description": "Get recent news headlines for any stock — titles, publishers, dates, and links.",
+  "exampleQuery": "What's the latest news on NVDA?",
+  "sampleResponse": {
+    "summary": "5 recent news articles for NVDA.",
+    "market": "US",
+    "stockData": [{ "symbol": "NVDA", "name": "NVIDIA Corporation", "currency": "USD", "exchange": "NASDAQ" }],
+    "news": [
+      { "title": "NVIDIA Reports Record Q4 Revenue", "publisher": "Reuters", "link": "https://example.com/article1", "publishedAt": "2026-02-25T14:30:00Z" },
+      { "title": "AI Chip Demand Continues to Surge", "publisher": "Bloomberg", "link": "https://example.com/article2", "publishedAt": "2026-02-24T09:15:00Z" }
+    ],
+    "insights": ["Recent headlines are dominated by strong earnings and AI demand."],
+    "disclaimer": "This is not financial advice."
+  }
+}

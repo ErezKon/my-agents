@@ -1,0 +1,12 @@
+{
+  "name": "Search Stock",
+  "description": "Find stock ticker symbols by company name or keyword.",
+  "exampleQuery": "Search for Apple stock",
+  "sampleResponse": {
+    "summary": "Found 3 results for 'Apple'.",
+    "market": "US",
+    "stockData": [{ "symbol": "AAPL", "name": "Apple Inc.", "currency": "USD", "exchange": "NASDAQ" }],
+    "insights": ["AAPL is the primary listing for Apple Inc. on NASDAQ."],
+    "disclaimer": "This is not financial advice."
+  }
+}

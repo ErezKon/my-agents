@@ -1,0 +1,15 @@
+{
+  "name": "Stock Quote",
+  "description": "Get the current price and key metrics for any US or Israeli (.TA) stock — price, change, market cap, P/E ratio, 52-week range, volume, EPS, dividend yield, beta.",
+  "exampleQuery": "What's the current price of Microsoft?",
+  "sampleResponse": {
+    "summary": "Microsoft (MSFT) is trading at $425.50, up 1.2% today.",
+    "market": "US",
+    "stockData": [{
+      "symbol": "MSFT", "name": "Microsoft Corporation", "currency": "USD", "exchange": "NASDAQ",
+      "quote": { "price": 425.50, "change": 5.03, "changePercent": 1.2, "previousClose": 420.47, "open": 421.00, "dayHigh": 427.10, "dayLow": 420.00, "volume": 23500000, "marketCap": 3170000000000, "peRatio": 35.2, "eps": 12.08, "dividendYield": 0.7, "fiftyTwoWeekHigh": 468.35, "fiftyTwoWeekLow": 309.45, "beta": 0.89 }
+    }],
+    "insights": ["MSFT is trading near the middle of its 52-week range."],
+    "disclaimer": "This is not financial advice."
+  }
+}

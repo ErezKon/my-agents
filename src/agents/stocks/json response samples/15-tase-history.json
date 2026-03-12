@@ -1,0 +1,17 @@
+{
+  "name": "TASE History",
+  "description": "Fetch daily historical price data for Israeli securities from TASE using the numeric TASE ID.",
+  "exampleQuery": "Show me the history of TASE 1150283 from 01/01/2025 to 31/01/2025",
+  "sampleResponse": {
+    "summary": "TASE 1150283 daily history for January 2025 — 20 trading days.",
+    "market": "Israeli",
+    "stockData": [{
+      "symbol": "1150283", "name": "Teva Pharmaceutical", "currency": "ILS", "exchange": "TASE",
+      "history": [
+        { "date": "02/01/2025", "open": 68.20, "high": 69.50, "low": 67.80, "close": 69.10, "volume": 4800000 }
+      ]
+    }],
+    "insights": ["Teva opened 2025 with a steady upward trend on TASE."],
+    "disclaimer": "This is not financial advice."
+  }
+}

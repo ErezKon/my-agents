@@ -1,0 +1,12 @@
+{
+  "name": "Export to Markdown",
+  "description": "Save any response as a beautifully formatted markdown (.md) file for later reference.",
+  "exampleQuery": "Export this to markdown",
+  "sampleResponse": {
+    "summary": "Report exported successfully.",
+    "market": "US",
+    "stockData": [],
+    "insights": ["Your report has been saved as a formatted markdown file."],
+    "disclaimer": "This is not financial advice."
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "recipes": [
+    {
+      "name": "Lemon‑Herb Salmon with Roasted Asparagus & Root Veggies",
+      "whyThisWorks": "The bright lemon and fresh rosemary lift the rich salmon, while the caramelized carrots, cauliflower and asparagus add sweet‑earthy contrast and a satisfying crunch.",
+      "additionalIngredients": [],
+      "prepTime": "15 min",
+      "cookTime": "20 min",
+      "difficulty": "Easy",
+      "instructions": [
+        "1. Preheat your oven to 425°F (220°C). Line a large baking sheet with parchment.",
+        "2. Pat the salmon fillets dry, then drizzle each with 1 tsp olive oil, a squeeze of lemon juice, and season with salt, pepper, and a pinch of grated ginger (optional for a subtle zing). Set aside.",
+        "3. On the same sheet, spread the asparagus spears, carrot sticks (cut into 1‑inch pieces), and cauliflower florets. Drizzle with olive oil, sprinkle with salt, pepper, and finely chopped rosemary. Toss to coat evenly.",
+        "4. Roast the vegetables for 8 minutes, then push them to the sides of the pan and place the salmon in the centre. Return to the oven and roast for another 10‑12 minutes, or until the salmon flakes easily with a fork and the veggies are golden‑brown and tender.",
+        "5. While everything cooks, zest the lemon and stir it into a quick vinaigrette: 2 tsp olive oil, 1 tsp lemon juice, a pinch of salt, and a few fresh mint leaves torn by hand.",
+        "6. To serve, plate a salmon fillet, pile on the roasted vegetables, and drizzle the mint‑lemon vinaigrette over the top. Finish with a scattering of toasted pine nuts and crumbled feta for salty richness.",
+        "7. Enjoy immediately, savoring the fragrant aroma of rosemary and lemon."
+      ],
+      "chefTips": [
+        "If your salmon fillets are thick, lower the oven temperature to 400°F after the first 8 minutes and finish cooking gently to avoid over‑drying.",
+        "Toast pine nuts in a dry skillet over medium heat for 2‑3 minutes, shaking the pan frequently, until they turn golden and release a buttery scent."
+      ],
+      "variations": [
+        "Swap salmon for beef strips; marinate the beef in olive oil, lemon, rosemary, and a dash of turmeric before roasting.",
+        "Add diced apples or peaches to the veggie mix for a sweet‑savory twist; they caramelize beautifully in the oven."
+      ]
+    },
+    {
+      "name": "Pistachio‑Crusted Salmon with Herb Barley & Roasted Mediterranean Vegetables",
+      "whyThisWorks": "The buttery salmon meets the crunchy pistachio crust, while the nutty barley and caramelized veg bring texture and bright Mediterranean flavors that tie the whole plate together.",
+      "additionalIngredients": [
+        "Lemon",
+        "Dijon mustard",
+        "Honey",
+        "Chicken or vegetable broth",
+        "Fresh parsley",
+        "Olive oil (you already have)",
+        "Salt & pepper (pantry staples)"
+      ],
+      "prepTime": "15 min",
+      "cookTime": "30 min",
+      "difficulty": "Medium",
+      "instructions": [
+        "1. Preheat oven to 425°F (220°C). Line a baking sheet with parchment.",
+        "2. Rinse 1 cup barley; combine with 2½ cups broth in a saucepan. Bring to a boil, reduce heat, cover and simmer 25‑30 min until tender. Stir in 1‑2 tbsp chopped fresh parsley, a drizzle of olive oil, salt and pepper; set aside.",
+        "3. While barley cooks, chop carrots, cauliflower, and asparagus into bite‑size pieces. Toss with 1‑2 tbsp olive oil, salt, pepper, and a pinch of rosemary. Spread on a second baking sheet and roast 15‑18 min, stirring halfway, until golden‑brown and tender.",
+        "4. For the pistachio crust: In a food processor, pulse ½ cup pistachios, 2 tbsp feta, and a handful of fresh mint until coarse. Transfer to a shallow dish.",
+        "5. In a small bowl, whisk together 1 tbsp Dijon mustard, 1 tsp honey, juice of half a lime, and a drizzle of olive oil. Pat 2 salmon fillets dry, season with salt & pepper, then brush the mustard mixture over the top.",
+        "6. Press the pistachio‑feta mixture onto the mustard‑coated side of each fillet, forming an even crust.",
+        "7. Place the crust‑side up on the parchment sheet. Bake 10‑12 min, or until the salmon flakes easily and the crust is golden and fragrant.",
+        "8. To plate: Spoon a bed of herb barley onto each plate, arrange roasted vegetables beside it, and lay the pistachio‑crusted salmon on top. Finish with a squeeze of fresh lime, a drizzle of olive oil, and a few extra mint leaves for brightness."
+      ],
+      "chefTips": [
+        "If you don’t have a food processor, finely chop pistachios and feta by hand – the texture will be a bit chunkier but still delicious.",
+        "For extra crispness, broil the salmon for the last 2 minutes, watching closely so the pistachios don’t burn."
+      ],
+      "variations": [
+        "Swap salmon for firm white fish like cod; the pistachio crust works beautifully with any flaky fish.",
+        "Add a handful of cooked chickpeas to the barley for extra protein and a Mediterranean touch."
+      ]
+    }
+  ]
+}

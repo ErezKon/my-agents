@@ -1,0 +1,12 @@
+services:
+  agents-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./outputs:/app/outputs
+    environment:
+      - NODE_TLS_REJECT_UNAUTHORIZED=0
+    restart: unless-stopped

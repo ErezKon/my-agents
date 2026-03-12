@@ -1,0 +1,19 @@
+{
+  "name": "Multi-Year Performance",
+  "description": "Get year-by-year performance across a range of years in one request, with cumulative change.",
+  "exampleQuery": "Show me AAPL performance from 2020 to 2025",
+  "sampleResponse": {
+    "summary": "Apple (AAPL) 2020–2025: cumulative gain of +287%.",
+    "market": "US",
+    "stockData": [{ "symbol": "AAPL", "name": "Apple Inc.", "currency": "USD", "exchange": "NASDAQ" }],
+    "multiYearPerformance": {
+      "symbol": "AAPL", "startYear": 2020, "endYear": 2025, "cumulativeChangePercent": 287.5,
+      "years": [
+        { "year": 2020, "openDate": "02/01/2020", "openValue": 75.09, "closeDate": "31/12/2020", "closeValue": 132.69, "change": 57.60, "changePercent": 76.71 },
+        { "year": 2021, "openDate": "04/01/2021", "openValue": 133.52, "closeDate": "31/12/2021", "closeValue": 177.57, "change": 44.05, "changePercent": 32.99 }
+      ]
+    },
+    "insights": ["AAPL's strongest year was 2020 with a 76.7% gain."],
+    "disclaimer": "This is not financial advice."
+  }
+}

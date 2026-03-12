@@ -1,0 +1,19 @@
+{
+  "name": "Market Movers",
+  "description": "See today's top gainers, biggest losers, or most actively traded stocks.",
+  "exampleQuery": "What are the top gainers today?",
+  "sampleResponse": {
+    "summary": "Today's top 5 gainers on US exchanges.",
+    "market": "US",
+    "stockData": [],
+    "movers": {
+      "category": "gainers",
+      "items": [
+        { "symbol": "XYZ", "name": "XYZ Corp", "price": 45.20, "change": 8.50, "changePercent": 23.1, "volume": 12000000 },
+        { "symbol": "ABC", "name": "ABC Inc", "price": 12.80, "change": 2.10, "changePercent": 19.6, "volume": 8500000 }
+      ]
+    },
+    "insights": ["XYZ surged 23% after an earnings beat."],
+    "disclaimer": "This is not financial advice."
+  }
+}

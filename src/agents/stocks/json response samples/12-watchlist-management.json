@@ -1,0 +1,20 @@
+{
+  "name": "Watchlist Management",
+  "description": "Create and manage persistent stock watchlists. You can create a watchlist, add/remove symbols, list all watchlists, or fetch live quotes for all symbols in a watchlist.",
+  "exampleQuery": "Create a watchlist called 'tech' with AAPL, MSFT, GOOGL",
+  "sampleResponse": {
+    "summary": "Created watchlist 'tech' with 3 symbols.",
+    "market": "US",
+    "stockData": [],
+    "watchlist": {
+      "name": "tech",
+      "symbols": ["AAPL", "MSFT", "GOOGL"],
+      "quotes": [
+        { "symbol": "AAPL", "name": "Apple Inc.", "price": 251.30, "change": 2.10, "changePercent": 0.84 },
+        { "symbol": "MSFT", "name": "Microsoft Corporation", "price": 425.50, "change": 5.03, "changePercent": 1.20 }
+      ]
+    },
+    "insights": ["Your tech watchlist is up across the board today."],
+    "disclaimer": "This is not financial advice."
+  }
+}
