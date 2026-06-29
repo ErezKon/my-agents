@@ -1,3 +1,23 @@
+/**
+ * ============================================================================
+ * RECIPE RESPONSE SCHEMA — Structured Output for the Chef Agent
+ * ============================================================================
+ *
+ * This Zod schema defines the shape of the Chef agent's final structured
+ * response. It is passed as `responseFormat` to `createAgent()`, which
+ * forces the LLM to produce JSON matching this exact shape.
+ *
+ * Fields:
+ * - `initialReaction`: The chef's enthusiastic first reaction to the query.
+ * - `producedRecipe`: Whether a recipe was successfully produced.
+ * - `recipeIdeas`: Array of 0–3 possible recipe suggestions (name + reason).
+ * - `topPick`: The full recipe for the chef's top recommendation,
+ *   including ingredients, instructions, timing, difficulty, tips, etc.
+ *   Uses `RecipeItemSchema` for the detailed recipe structure.
+ * - `source`: Whether the recipe came from the local database or was
+ *   freshly created by the LLM.
+ * ============================================================================
+ */
 import {z} from "zod";
 import {RecipeItemSchema} from './recipe-item.schema';
 

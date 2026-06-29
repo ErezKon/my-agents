@@ -1,3 +1,20 @@
+/**
+ * ============================================================================
+ * SAVE OUTPUT — Generic Agent Output Saver (Chef & Stocks)
+ * ============================================================================
+ *
+ * Saves request/response data to disk for the Chef and Stocks agents.
+ * Creates a timestamped folder under `outputs/` with:
+ *   - `request.json` — The original request payload.
+ *   - `full-response.json` — The complete agent response object.
+ *   - `response-markdown.md` — Extracted from `structuredResponse.answer`.
+ *   - `response.md` — (Stocks only) Formatted markdown report built from
+ *     the structured response data using `buildMarkdown()`.
+ *
+ * The function inspects the response structure to determine what type of
+ * agent produced it and extracts the appropriate content for each file.
+ * ============================================================================
+ */
 import * as fs from "fs";
 import * as path from "path";
 import {buildMarkdown} from '../agents/stocks/tools/export-markdown.tool';

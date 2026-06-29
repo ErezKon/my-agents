@@ -1,3 +1,32 @@
+/**
+ * ============================================================================
+ * STOCKS RESPONSE SCHEMA — Comprehensive Structured Output
+ * ============================================================================
+ *
+ * This is the most complex Zod schema in the project. It defines the
+ * structured output format for the Stocks agent's final response.
+ *
+ * Passed as `responseFormat` to `createAgent()`, it forces the LLM to
+ * produce JSON matching this exact shape. Most fields are optional because
+ * not every query requires all sections (e.g., a simple quote lookup won't
+ * include comparison data or watchlist information).
+ *
+ * MAJOR SECTIONS:
+ * - `summary` / `answer` — Human-readable text response.
+ * - `market` — Which market (US/TASE) the data relates to.
+ * - `stockData` — Array of individual stock quotes, history, yearly perf.
+ * - `comparison` — Side-by-side comparison of multiple stocks.
+ * - `indices` — Major market index data (S&P 500, NASDAQ, etc.).
+ * - `movers` — Top gainers, losers, most active stocks.
+ * - `news` — Recent headlines related to queried stocks.
+ * - `technicalIndicators` — SMA, EMA, RSI, MACD analysis results.
+ * - `multiYearPerformance` — Year-by-year performance breakdown.
+ * - `dividends` — Dividend payment history and annual summaries.
+ * - `watchlist` — Persistent watchlist data.
+ * - `capabilities` — Self-describing list of what the agent can do.
+ * - `insights` / `disclaimer` — Analyst commentary and legal disclaimer.
+ * ============================================================================
+ */
 import {z} from "zod";
 
 export const StocksResponseSchema = z.object({

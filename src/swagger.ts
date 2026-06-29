@@ -20,6 +20,7 @@ const swaggerDocument = {
     { name: "Stocks", description: "Stock broker assistant — historic data, quotes & analysis" },
     { name: "MG-4", description: "MG-4 car manual Q&A agent" },
     { name: "IONIQ-6", description: "Hyundai IONIQ 6 car manual Q&A agent" },
+    { name: "Router", description: "Smart router — auto-classifies your question and delegates to the best agent" },
   ],
   paths: {
     "/api/chef/image": {
@@ -153,6 +154,65 @@ const swaggerDocument = {
             },
           },
           "400": { description: "Missing required parameters" },
+          "500": { description: "Internal server error" },
+        },
+      },
+    },
+    "/api/ask": {
+      post: {
+        tags: ["Router"],
+        summary: "Ask any question — auto-routed to the best agent",
+        description:
+          "Classifies the user's question using an LLM and delegates it to the most suitable specialist agent (Chef, Stocks, MG-4, or IONIQ 6). Returns the chosen agent's response along with a `routedTo` field indicating which agent handled it.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["message"],
+                properties: {
+                  message: {
+                    type: "string",
+                    example: "How do I charge my electric car?",
+                  },
+                  imageBase64: {
+                    type: "string",
+                    description:
+                      "Optional base64-encoded image (used when the question is routed to the Chef agent)",
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Agent response with routing metadata",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    routedTo: {
+                      type: "string",
+                      enum: ["chef", "stocks", "mg4", "ioniq6"],
+                      example: "mg4",
+                    },
+                    content: { type: "object" },
+                    model: { type: "string", example: "gpt-oss-120b" },
+                    markdown: {
+                      type: "string",
+                      nullable: true,
+                      description:
+                        "Markdown-formatted answer (returned for MG-4 and IONIQ 6 agents)",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": { description: "Missing message or unclassifiable question" },
           "500": { description: "Internal server error" },
         },
       },

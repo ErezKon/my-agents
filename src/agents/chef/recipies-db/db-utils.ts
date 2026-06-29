@@ -1,3 +1,16 @@
+/**
+ * ============================================================================
+ * RECIPE DATABASE UTILITIES
+ * ============================================================================
+ *
+ * Helper functions for reading from and writing to the local recipe database
+ * (`recipes-db.json`). Also includes a fuzzy string matching function used
+ * by the search tool to find recipes with approximately matching names.
+ *
+ * The database is a simple JSON file with a `recipes` array. Each element
+ * conforms to `RecipeItemSchema`. File I/O is synchronous for simplicity.
+ * ============================================================================
+ */
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
