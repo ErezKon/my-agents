@@ -64,23 +64,10 @@ export const createMG4Agent = (apiKey: string) => {
     // In-memory checkpointer — isolates each request's conversation state.
     const checkpointer = new MemorySaver();
 
-    // Primary LLM model used for the agent's reasoning and responses.
+    // Generic model configuration — replace baseURL and apiKey with your
+    // own OpenAI-compatible endpoint (e.g., local Ollama, vLLM, etc.).
     // temperature=0.3 keeps answers factual and grounded in manual content.
     // timeout=60000 (60s) accounts for slow PDF parsing on first load.
-    const model = new ChatOpenAI({
-        model: "gpt-oss-120b",
-        temperature: 0.3,
-        maxRetries: 3,
-        timeout: 60000,
-        openAIApiKey: apiKey,
-        apiKey: apiKey,
-        configuration: {
-            baseURL: "https://genai-api-dev.dell.com/v1"
-        }
-    });
-
-    // Placeholder for an alternative model configuration (e.g., local Ollama).
-    // Not currently used — kept as a template for switching to a self-hosted LLM.
     const ollamaModel = new ChatOpenAI({
         model: "gpt-oss-120b",
         temperature: 0.3,
@@ -96,7 +83,7 @@ export const createMG4Agent = (apiKey: string) => {
     // system prompt (defines scope, citation format, language handling).
     // No responseFormat — the agent returns free-form markdown answers.
     const agent = createAgent({
-        model,
+        model: ollamaModel,
         checkpointer,
         systemPrompt: mg4SystemPrompt,
         tools: [searchManuals, listManuals, getTips],

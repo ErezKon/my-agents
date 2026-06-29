@@ -16,9 +16,11 @@
     "@langchain/openai": "^1.2.0",
     "@langchain/tavily": "^1.2.0",
     "dotenv": "^17.3.1",
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "langchain": "^1.2.3",
     "pdf-parse": "^1.1.1",
+    "pdfmake": "^0.2.23",
     "swagger-ui-express": "^5.0.1",
     "zod": "^4.3.6"
   },

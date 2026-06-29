@@ -49,23 +49,10 @@ export const createIONIQ6Agent = (apiKey: string) => {
     // In-memory checkpointer — isolates each request's conversation state.
     const checkpointer = new MemorySaver();
 
-    // Primary LLM model — same configuration as MG-4 agent.
+    // Generic model configuration — replace baseURL and apiKey with your
+    // own OpenAI-compatible endpoint (e.g., local Ollama, vLLM, etc.).
     // temperature=0.3 for factual, manual-grounded answers.
     // timeout=60000 (60s) for PDF parsing on first load.
-    const model = new ChatOpenAI({
-        model: "gpt-oss-120b",
-        temperature: 0.3,
-        maxRetries: 3,
-        timeout: 60000,
-        openAIApiKey: apiKey,
-        apiKey: apiKey,
-        configuration: {
-            baseURL: "https://genai-api-dev.dell.com/v1"
-        }
-    });
-
-    // Placeholder for an alternative model configuration (e.g., local Ollama).
-    // Not currently used — kept as a template for switching to a self-hosted LLM.
     const ollamaModel = new ChatOpenAI({
         model: "gpt-oss-120b",
         temperature: 0.3,
@@ -80,7 +67,7 @@ export const createIONIQ6Agent = (apiKey: string) => {
     // Assemble the LangGraph agent with PDF-based tools and the IONIQ 6
     // system prompt. No responseFormat — returns free-form markdown answers.
     const agent = createAgent({
-        model,
+        model: ollamaModel,
         checkpointer,
         systemPrompt: ioniq6SystemPrompt,
         tools: [searchManuals, listManuals, getTips],

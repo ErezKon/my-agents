@@ -91,17 +91,18 @@ export const createChefAgent = (apiKey: string, imageBase64?: string) => {
     // unique thread_id to isolate conversations.
     const checkpointer = new MemorySaver();
 
-    // Instantiate the LLM model. temperature=0.5 gives the chef some creative
-    // variation while still keeping responses grounded and coherent.
-    const model = new ChatOpenAI({
+    // Generic model configuration — replace baseURL and apiKey with your
+    // own OpenAI-compatible endpoint (e.g., local Ollama, vLLM, etc.).
+    // temperature=0.5 gives the chef some creative variation while still
+    // keeping responses grounded and coherent.
+    const ollamaModel = new ChatOpenAI({
         model: "gpt-oss-120b",
         temperature: 0.5,
         maxRetries: 3,
         timeout: 10000,
-        openAIApiKey: apiKey,
-        apiKey: apiKey,
+        apiKey: "ApiKey here",
         configuration: {
-            baseURL: "https://genai-api-dev.dell.com/v1"
+            baseURL: "enter your address here"
         }
     });
 
@@ -122,7 +123,7 @@ export const createChefAgent = (apiKey: string, imageBase64?: string) => {
     //   - responseFormat (RecipeSchema) constraining the final output to structured JSON
     //   - The list of tools the LLM can invoke during its reasoning loop
     const chat = createAgent({
-        model,
+        model: ollamaModel,
         checkpointer,
         systemPrompt: chefSystemPrompt,
         responseFormat: RecipeSchema,
