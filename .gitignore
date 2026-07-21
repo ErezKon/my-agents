@@ -2,3 +2,8 @@ node_modules/*
 outputs/*
 .idea/*
 .vscode/*
+.env
+src/agents/github/repositories-summary/*
+src/agents/house/sources/*
+src/agents/mortgage/sources/*
+src/agents/slide-generator/cache/giphy/*
