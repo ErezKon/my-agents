@@ -42,6 +42,7 @@ import {tool} from "@langchain/core/tools";
 import {ChatOpenAI} from '@langchain/openai';
 import {z} from "zod";
 import {LogColors} from '../../../utils/log-colors.util';
+import {VISION_BASE_URL, VISION_MODEL} from '../../../config';
 
 /** System prompt for identifying raw ingredients in a photo. */
 const INGREDIENTS_SYSTEM_PROMPT = `
@@ -68,7 +69,7 @@ const FOOD_DESCRIPTION_SYSTEM_PROMPT = `
  * structured output matching the provided Zod schema.
  *
  * @param imageBase64 - The image data as a base64-encoded string.
- * @param apiKey - API key for the Dell GenAI endpoint.
+ * @param apiKey - API key for the LLM endpoint.
  * @param systemPrompt - Instructions telling the vision model what to extract.
  * @param outputSchema - Zod schema constraining the LLM's output shape.
  * @returns The parsed structured output matching `outputSchema`.
@@ -83,14 +84,14 @@ const invokeVisionModel = async <T extends z.ZodRawShape>(
     outputSchema: z.ZodObject<T>
 ) => {
     const model = new ChatOpenAI({
-        model: "pixtral-12b-2409",
+        model: VISION_MODEL,
         temperature: 0.1,
         maxRetries: 3,
         timeout: 10000,
         openAIApiKey: apiKey,
         apiKey: apiKey,
         configuration: {
-            baseURL: "https://genai-api-dev.dell.com/v1"
+            baseURL: VISION_BASE_URL
         }
     });
     const structuredModel = model.withStructuredOutput(outputSchema);

@@ -1,261 +1,335 @@
-/**
- * ============================================================================
- * EXPORT APPLIANCE COMPARISON TOOL — Excel & PDF Report Generator
- * ============================================================================
- *
- * A LangChain tool that exports structured product comparison data into
- * downloadable Excel (.xlsx) and/or PDF files. This is the final step in
- * the Appliances agent's workflow — after searching, comparing, and
- * presenting products in chat, the user can request a formatted document
- * to save, print, or share with family members.
- *
- * EXPORT FORMATS:
- * ───────────────
- * 1. **Excel (.xlsx)** — Generated using the `exceljs` library.
- *    - Blue header row with white bold text
- *    - Price row, optional rating row
- *    - All spec keys merged from all products (N/A for missing specs)
- *    - Pros and cons as newline-separated lists
- *    - "★ מומלץ" flag for recommended products
- *    - 25-character column width for readability
- *
- * 2. **PDF** — Generated using the `pdfmake` library with DejaVuSans font
- *    (supports Hebrew/Unicode characters).
- *    - Title header with product comparison name
- *    - Auto-sized table with specs for all products
- *    - Pros/cons section with ✓/✗ markers
- *    - Requires DejaVuSans.ttf and DejaVuSans-Bold.ttf in the `assets/`
- *      directory (relative to this file's parent)
- *
- * FILE OUTPUT:
- * - Files are saved to `<project-root>/outputs/appliance-exports/`
- * - Filename format: `comparison-<ISO-timestamp>.xlsx` or `.pdf`
- * - The directory is auto-created if it doesn't exist
- * - The tool returns the absolute file paths so the Express handler can
- *   serve them as download links
- *
- * PRODUCT DATA SCHEMA:
- * Each product in the input array must match the `ProductSchema`:
- *   - `name` — Product model name
- *   - `brand` — Brand name
- *   - `price` — Price string (e.g., "₪3,500")
- *   - `specs` — Record of feature→value pairs (e.g., { "נפח": "9 ק\"ג" })
- *   - `pros` — Array of advantage strings
- *   - `cons` — Array of disadvantage strings
- *   - `rating` — Optional user rating string
- *   - `recommended` — Optional boolean flag for the top pick
- *
- * ARCHITECTURE NOTE:
- * This tool uses `import.meta.url` + `fileURLToPath` to resolve paths
- * relative to the source file (ESM-compatible). The `__dirname` equivalent
- * is computed at module load time.
- *
- * DEPENDENCIES:
- * - `exceljs` — Excel workbook generation
- * - `pdfmake` — PDF document generation (with custom font support)
- * - DejaVuSans font files in `../assets/` for PDF Hebrew rendering
- * ============================================================================
- */
-
-import { tool } from "langchain";
-import { z } from "zod";
-import * as fs from "fs";
-import * as path from "path";
-import { fileURLToPath } from "url";
+import { tool } from 'langchain';
+import { z } from 'zod';
+import * as fs from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+import ExcelJS from 'exceljs';
+import PdfPrinter from 'pdfmake/src/printer';
 import { LogColors, color256 } from '../../../utils/log-colors.util';
-import ExcelJS from "exceljs";
-import PdfPrinter from "pdfmake/src/printer";
+import { sanitizeFolderName } from '../../../utils/save-output-base';
+import { fetchAllProductImages, ProductImage } from './fetch-product-image.util';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ASSETS_DIR = path.join(__dirname, "..", "assets");
-const EXPORTS_DIR = path.join(__dirname, "..", "..", "..", "..", "outputs", "appliance-exports");
+const ASSETS_DIR = path.join(__dirname, '..', 'assets');
 
-const TAG = `${color256(45)}[export_appliance_comparison]${LogColors.RESET}`;
+const TAG = `${color256(178)}[export_appliance_comparison]${LogColors.RESET}`;
 
-/**
- * Ensure the exports output directory exists, creating it recursively
- * if needed. Called before every export operation.
- */
-function ensureExportsDir() {
-    if (!fs.existsSync(EXPORTS_DIR)) {
-        fs.mkdirSync(EXPORTS_DIR, { recursive: true });
-    }
+/** Reverse word order for PDF RTL display (pdfkit places glyphs LTR). */
+function rtlWords(text: string): string {
+    if (!text) return '';
+    return text.split(/(\s+)/).reverse().join('');
 }
 
-/**
- * Zod schema for individual product data in the comparison.
- * Validated at the tool boundary to ensure the LLM provides well-structured
- * product objects with all required fields.
- */
-const ProductSchema = z.object({
-    name: z.string(),
+
+const ModelSchema = z.object({
     brand: z.string(),
-    price: z.string(),
-    specs: z.record(z.string()),
-    pros: z.array(z.string()),
-    cons: z.array(z.string()),
-    rating: z.string().optional(),
-    recommended: z.boolean().optional(),
+    model: z.string(),
+    keyFeatures: z.array(z.string()).optional(),
+    reliability: z.string().optional(),
+    energyRating: z.string().optional(),
+    priceILS: z.number().optional(),
+    warranty: z.string().optional(),
+    valueForMoney: z.string().optional(),
+    heightCm: z.number().optional(),
+    widthCm: z.number().optional(),
+    depthCm: z.number().optional(),
+    volumeLiters: z.number().optional(),
+    pros: z.array(z.string()).optional(),
+    cons: z.array(z.string()).optional(),
+    fromGivenList: z.boolean().optional(),
+    url: z.string().optional(),
 });
 
-/**
- * Generate an Excel (.xlsx) comparison workbook.
- *
- * @param products - Array of validated product objects.
- * @param title - Title for the worksheet (unused in Excel but kept for API consistency).
- * @returns Absolute file path to the saved .xlsx file.
- */
-async function exportExcel(products: z.infer<typeof ProductSchema>[], title: string): Promise<string> {
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("Comparison");
+const COLUMNS: { key: keyof z.infer<typeof ModelSchema> | 'source' | 'dimensions'; header: string }[] = [
+    { key: 'brand', header: 'מותג' },
+    { key: 'model', header: 'דגם' },
+    { key: 'source', header: 'מקור' },
+    { key: 'dimensions', header: 'מידות (ג×ר×ע ס\"מ) / נפח' },
+    { key: 'keyFeatures', header: 'תכונות עיקריות' },
+    { key: 'energyRating', header: 'דירוג אנרגטי' },
+    { key: 'reliability', header: 'אמינות' },
+    { key: 'warranty', header: 'אחריות/שירות' },
+    { key: 'priceILS', header: 'מחיר (₪)' },
+    { key: 'valueForMoney', header: 'תמורה לכסף' },
+    { key: 'pros', header: 'יתרונות' },
+    { key: 'cons', header: 'חסרונות' },
+];
 
-    // Collect all unique spec keys across all products
-    const allSpecKeys = new Set<string>();
-    products.forEach(p => Object.keys(p.specs).forEach(k => allSpecKeys.add(k)));
-
-    // Header row: Feature column + one column per product
-    const headerRow = ["Feature / מאפיין", ...products.map(p => `${p.brand} ${p.name}`)];
-    ws.addRow(headerRow);
-    const hr = ws.getRow(1);
-    hr.font = { bold: true, size: 12 };
-    hr.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF4472C4" } };
-    hr.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 12 };
-
-    // Price row (always present)
-    ws.addRow(["מחיר / Price", ...products.map(p => p.price)]);
-
-    // Rating row (only if at least one product has a rating)
-    if (products.some(p => p.rating)) ws.addRow(["דירוג / Rating", ...products.map(p => p.rating || "N/A")]);
-
-    // Spec rows — one row per unique spec key
-    for (const key of allSpecKeys) {
-        ws.addRow([key, ...products.map(p => p.specs[key] || "N/A")]);
+function cellValue(model: z.infer<typeof ModelSchema>, key: string): string {
+    switch (key) {
+        case 'source':
+            return model.fromGivenList ? 'מהרשימה' : 'חלופה';
+        case 'keyFeatures':
+            return (model.keyFeatures ?? []).join(', ') || 'לא זמין';
+        case 'priceILS':
+            return typeof model.priceILS === 'number' ? model.priceILS.toLocaleString('en-US') : 'לא זמין';
+        case 'dimensions': {
+            const parts: string[] = [];
+            const h = model.heightCm, w = model.widthCm, d = model.depthCm;
+            if (h != null || w != null || d != null) {
+                parts.push(`${h ?? '?'}×${w ?? '?'}×${d ?? '?'} ס"מ`);
+            }
+            if (model.volumeLiters != null) {
+                parts.push(`${model.volumeLiters} ליטר`);
+            }
+            return parts.join(' / ') || 'לא זמין';
+        }
+        case 'pros':
+            return (model.pros ?? []).join(', ') || 'לא זמין';
+        case 'cons':
+            return (model.cons ?? []).join(', ') || 'לא זמין';
+        default: {
+            const v = (model as any)[key];
+            return v != null && v !== '' ? String(v) : 'לא זמין';
+        }
     }
-
-    // Pros and cons section
-    ws.addRow([]);
-    ws.addRow(["יתרונות / Pros", ...products.map(p => p.pros.join("\n"))]);
-    ws.addRow(["חסרונות / Cons", ...products.map(p => p.cons.join("\n"))]);
-
-    // Recommendation flag
-    if (products.some(p => p.recommended)) {
-        ws.addRow([]);
-        ws.addRow(["מומלץ / Recommended", ...products.map(p => p.recommended ? "★ מומלץ" : "")]);
-    }
-
-    // Auto-width columns
-    ws.columns.forEach(col => { col.width = 25; });
-
-    // Save to disk
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const filename = `comparison-${timestamp}.xlsx`;
-    const filePath = path.join(EXPORTS_DIR, filename);
-    await wb.xlsx.writeFile(filePath);
-    return filePath;
 }
 
-/**
- * Generate a PDF comparison document with Hebrew font support.
- *
- * @param products - Array of validated product objects.
- * @param title - Title displayed at the top of the PDF.
- * @returns Absolute file path to the saved .pdf file.
- */
-function exportPdf(products: z.infer<typeof ProductSchema>[], title: string): string {
-    // Load DejaVuSans fonts for Hebrew/Unicode support
-    const fonts = {
-        DejaVuSans: {
-            normal: path.join(ASSETS_DIR, "DejaVuSans.ttf"),
-            bold: path.join(ASSETS_DIR, "DejaVuSans-Bold.ttf"),
-            italics: path.join(ASSETS_DIR, "DejaVuSans.ttf"),
-            bolditalics: path.join(ASSETS_DIR, "DejaVuSans-Bold.ttf"),
-        },
-    };
+interface RecommendationSets {
+    fromGivenBrands: string[];
+    fromAlternatives: string[];
+    overallBest: string[];
+}
 
-    const printer = new PdfPrinter(fonts);
+/** Detect a supported ExcelJS image extension from the local file path. Returns null for unsupported formats (e.g. webp). */
+function excelImageExt(localPath: string): 'png' | 'jpeg' | null {
+    if (localPath.endsWith('.png')) return 'png';
+    if (localPath.endsWith('.jpg') || localPath.endsWith('.jpeg')) return 'jpeg';
+    return null; // webp / gif etc. not supported by ExcelJS
+}
 
-    // Collect all unique spec keys
-    const allSpecKeys = new Set<string>();
-    products.forEach(p => Object.keys(p.specs).forEach(k => allSpecKeys.add(k)));
+export async function writeExcel(filePath: string, category: string, models: z.infer<typeof ModelSchema>[], summary: string, recommendations: RecommendationSets, imageMap: Map<string, ProductImage>) {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet(category.slice(0, 28) || 'comparison', { views: [{ rightToLeft: true }] });
 
-    // Build comparison table body
-    const tableBody: any[][] = [];
-    const headerRow = [{ text: "Feature", bold: true }, ...products.map(p => ({ text: `${p.brand} ${p.name}`, bold: true }))];
-    tableBody.push(headerRow);
-    tableBody.push(["Price", ...products.map(p => p.price)]);
-    for (const key of allSpecKeys) {
-        tableBody.push([key, ...products.map(p => p.specs[key] || "N/A")]);
+    const IMG_COL = COLUMNS.length + 1; // 1-based index for the image column
+    const IMG_PIXEL_W = 120;
+    const IMG_PIXEL_H = 100;
+    const IMG_ROW_HEIGHT = 80; // points
+
+    ws.addRow([`השוואת ${category}`]);
+    ws.mergeCells(1, 1, 1, IMG_COL);
+    ws.getCell(1, 1).font = { bold: true, size: 14 };
+
+    const headers = [...COLUMNS.map(c => c.header), 'תמונה'];
+    const headerRow = ws.addRow(headers);
+    headerRow.font = { bold: true };
+    headerRow.eachCell(cell => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
+        cell.alignment = { horizontal: 'right', wrapText: true };
+    });
+
+    const MODEL_COL_IDX = COLUMNS.findIndex(c => c.key === 'model') + 1; // 1-based
+
+    for (const m of models) {
+        const row = ws.addRow(COLUMNS.map(c => cellValue(m, c.key as string)));
+        row.alignment = { horizontal: 'right', wrapText: true, vertical: 'top' };
+
+        if (m.url && MODEL_COL_IDX > 0) {
+            const modelCell = row.getCell(MODEL_COL_IDX);
+            modelCell.value = { text: m.model, hyperlink: m.url } as any;
+            modelCell.font = { color: { argb: 'FF0563C1' }, underline: true };
+        }
+
+        const img = imageMap.get(`${m.brand}|${m.model}`);
+        if (img) {
+            const ext = excelImageExt(img.localPath);
+            if (ext) {
+                row.height = IMG_ROW_HEIGHT;
+                const imageId = wb.addImage({
+                    buffer: img.buffer as any,
+                    extension: ext,
+                });
+                ws.addImage(imageId, {
+                    tl: { col: IMG_COL - 1, row: row.number - 1 },
+                    ext: { width: IMG_PIXEL_W, height: IMG_PIXEL_H },
+                });
+            }
+        }
     }
 
-    // Build the PDF document definition
-    const dd: any = {
-        defaultStyle: { font: "DejaVuSans", fontSize: 9 },
+    ws.columns.forEach((col, idx) => {
+        col.width = idx === IMG_COL - 1 ? 18 : 22;
+    });
+
+    ws.addRow([]);
+    const sumTitle = ws.addRow(['סיכום']);
+    sumTitle.font = { bold: true };
+    ws.addRow([summary]);
+
+    const recSections: { title: string; items: string[] }[] = [
+        { title: 'המלצות — מותגים מהרשימה', items: recommendations.fromGivenBrands },
+        { title: 'המלצות — מותגים חלופיים', items: recommendations.fromAlternatives },
+        { title: 'המלצות — הטובים ביותר מכל המותגים', items: recommendations.overallBest },
+    ];
+    for (const sec of recSections) {
+        if (!sec.items.length) continue;
+        ws.addRow([]);
+        const secTitle = ws.addRow([sec.title]);
+        secTitle.font = { bold: true };
+        secTitle.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
+        for (const r of sec.items) ws.addRow([`• ${r}`]);
+    }
+
+    await wb.xlsx.writeFile(filePath);
+}
+
+/** Return a pdfmake-compatible data-URI for an image, or null if the format is unsupported (e.g. webp). */
+function pdfImageDataUri(img: ProductImage): string | null {
+    const lp = img.localPath.toLowerCase();
+    let mime: string;
+    if (lp.endsWith('.png')) mime = 'image/png';
+    else if (lp.endsWith('.jpg') || lp.endsWith('.jpeg')) mime = 'image/jpeg';
+    else return null; // webp / gif not supported by pdfmake
+    return `data:${mime};base64,${img.buffer.toString('base64')}`;
+}
+
+export function writePdf(filePath: string, category: string, models: z.infer<typeof ModelSchema>[], summary: string, recommendations: RecommendationSets, imageMap: Map<string, ProductImage>): Promise<void> {
+    // DejaVu Sans covers Hebrew + Latin + digits + ₪, unlike NotoSansHebrew which
+    // renders Latin/digits as missing-glyph boxes (tofu).
+    const fonts = {
+        Hebrew: {
+            normal: path.join(ASSETS_DIR, 'DejaVuSans.ttf'),
+            bold: path.join(ASSETS_DIR, 'DejaVuSans-Bold.ttf'),
+            italics: path.join(ASSETS_DIR, 'DejaVuSans.ttf'),
+            bolditalics: path.join(ASSETS_DIR, 'DejaVuSans-Bold.ttf'),
+        },
+    };
+    const printer = new PdfPrinter(fonts);
+
+    const IMG_WIDTH_PDF = 60;
+
+    const headerRow = [
+        ...COLUMNS.map(c => ({ text: rtlWords(c.header), bold: true, alignment: 'right', fillColor: '#D9E1F2' })),
+        { text: rtlWords('תמונה'), bold: true, alignment: 'center', fillColor: '#D9E1F2' },
+    ];
+
+    const MODEL_COL_PDF = COLUMNS.findIndex(c => c.key === 'model');
+
+    const dataRows = models.map(m => {
+        const cells = COLUMNS.map((c, idx) => {
+            const cellText = rtlWords(cellValue(m, c.key as string));
+            if (idx === MODEL_COL_PDF && m.url) {
+                return { text: cellText, link: m.url, color: '#0563C1', decoration: 'underline', alignment: 'right' };
+            }
+            return { text: cellText, alignment: 'right' };
+        });
+        const img = imageMap.get(`${m.brand}|${m.model}`);
+        const dataUri = img ? pdfImageDataUri(img) : null;
+        const imgCell: any = dataUri
+            ? { image: dataUri, width: IMG_WIDTH_PDF, alignment: 'center' }
+            : { text: '–', alignment: 'center' };
+        return [...cells, imgCell];
+    });
+
+    const tableBody = [headerRow, ...dataRows];
+    const colWidths = [...COLUMNS.map(() => 'auto'), IMG_WIDTH_PDF + 10];
+
+    const recSections: { title: string; items: string[] }[] = [
+        { title: 'המלצות — מותגים מהרשימה', items: recommendations.fromGivenBrands },
+        { title: 'המלצות — מותגים חלופיים', items: recommendations.fromAlternatives },
+        { title: 'המלצות — הטובים ביותר מכל המותגים', items: recommendations.overallBest },
+    ];
+    const recContent: any[] = [];
+    for (const sec of recSections) {
+        if (!sec.items.length) continue;
+        recContent.push({ text: rtlWords(sec.title), fontSize: 12, bold: true, margin: [0, 12, 0, 4], fillColor: '#FFF2CC' });
+        recContent.push({ ul: sec.items.map(r => rtlWords(r)) });
+    }
+
+    const docDefinition: any = {
+        defaultStyle: { font: 'Hebrew', alignment: 'right', fontSize: 9 },
+        pageOrientation: 'landscape',
         content: [
-            { text: title, fontSize: 16, bold: true, margin: [0, 0, 0, 10] },
-            { table: { headerRows: 1, widths: ["auto", ...products.map(() => "*")], body: tableBody }, layout: "lightHorizontalLines" },
-            { text: "\nPros / Cons", fontSize: 12, bold: true, margin: [0, 10, 0, 5] },
-            ...products.flatMap(p => [
-                { text: `${p.brand} ${p.name}:`, bold: true, margin: [0, 5, 0, 2] },
-                { ul: p.pros.map(pro => `✓ ${pro}`) },
-                { ul: p.cons.map(con => `✗ ${con}`) },
-            ]),
+            { text: rtlWords(`השוואת ${category}`), fontSize: 16, bold: true, margin: [0, 0, 0, 10] },
+            {
+                table: { headerRows: 1, widths: colWidths, body: tableBody },
+                layout: 'lightHorizontalLines',
+            },
+            { text: rtlWords('סיכום'), fontSize: 13, bold: true, margin: [0, 14, 0, 4] },
+            { text: rtlWords(summary) },
+            ...recContent,
+            { text: rtlWords('⚠️ המחירים והנתונים משוערים ועשויים להשתנות. מומלץ לאמת מול הספק לפני רכישה.'), fontSize: 8, italics: true, margin: [0, 14, 0, 0] },
         ],
     };
 
-    // Generate and save the PDF
-    const pdfDoc = printer.createPdfKitDocument(dd);
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const filename = `comparison-${timestamp}.pdf`;
-    const filePath = path.join(EXPORTS_DIR, filename);
-    pdfDoc.pipe(fs.createWriteStream(filePath));
-    pdfDoc.end();
-    return filePath;
+    return new Promise((resolve, reject) => {
+        try {
+            const pdfDoc = printer.createPdfKitDocument(docDefinition);
+            const stream = fs.createWriteStream(filePath);
+            pdfDoc.pipe(stream);
+            pdfDoc.on('error', reject);
+            stream.on('finish', () => resolve());
+            stream.on('error', reject);
+            pdfDoc.end();
+        } catch (err) {
+            reject(err);
+        }
+    });
 }
 
-/**
- * LangChain tool: export_appliance_comparison
- *
- * Exports structured product comparison data to Excel, PDF, or both formats.
- * Returns the absolute file path(s) of the generated document(s).
- */
-export const exportApplianceComparison = tool(
-    async ({ products, title, format }) => {
-        const exportTitle = title || "Appliance Comparison";
-        const exportFormat = format || "excel";
-        console.log(`${TAG} INPUT: ${products.length} products, format=${exportFormat}, title="${exportTitle}"`);
-        ensureExportsDir();
+export const createExportApplianceComparisonTool = (outputDir: string) =>
+    tool(
+        async ({ category, models, summary, recommendations }) => {
+            console.log(`${TAG} INPUT: category='${category}', models=${models.length}`);
 
-        try {
-            let filePath: string;
+            const recs: RecommendationSets = {
+                fromGivenBrands: recommendations?.fromGivenBrands ?? [],
+                fromAlternatives: recommendations?.fromAlternatives ?? [],
+                overallBest: recommendations?.overallBest ?? [],
+            };
+            fs.mkdirSync(outputDir, { recursive: true });
 
-            if (exportFormat === "excel" || exportFormat === "both") {
-                filePath = await exportExcel(products, exportTitle);
-                console.log(`${TAG} Excel saved: ${filePath}`);
+            // Fetch product images for all models in parallel
+            console.log(`${TAG} Fetching product images...`);
+            const imageMap = await fetchAllProductImages(models, outputDir);
 
-                if (exportFormat === "both") {
-                    const pdfPath = exportPdf(products, exportTitle);
-                    console.log(`${TAG} PDF saved: ${pdfPath}`);
-                    return JSON.stringify({ success: true, files: [filePath, pdfPath] });
-                }
+            const base = sanitizeFolderName(category) || 'comparison';
+            const excelPath = path.join(outputDir, `${base}-comparison.xlsx`);
+            const pdfPath = path.join(outputDir, `${base}-comparison.pdf`);
 
-                return JSON.stringify({ success: true, files: [filePath] });
+            const generated: { excelPath?: string; pdfPath?: string; warnings: string[] } = { warnings: [] };
+
+            try {
+                await writeExcel(excelPath, category, models, summary, recs, imageMap);
+                generated.excelPath = excelPath;
+                console.log(`${TAG} OUTPUT: wrote Excel ${excelPath}`);
+            } catch (err: any) {
+                generated.warnings.push(`Excel failed: ${err.message}`);
+                console.log(`${TAG} ERROR (excel): ${err.message}`);
             }
 
-            filePath = exportPdf(products, exportTitle);
-            console.log(`${TAG} PDF saved: ${filePath}`);
-            return JSON.stringify({ success: true, files: [filePath] });
-        } catch (err: any) {
-            console.log(`${TAG} ERROR: ${err.message}`);
-            return JSON.stringify({ success: false, error: err.message });
+            try {
+                await writePdf(pdfPath, category, models, summary, recs, imageMap);
+                generated.pdfPath = pdfPath;
+                console.log(`${TAG} OUTPUT: wrote PDF ${pdfPath}`);
+            } catch (err: any) {
+                generated.warnings.push(`PDF failed: ${err.message}`);
+                console.log(`${TAG} ERROR (pdf): ${err.message}`);
+            }
+
+            return JSON.stringify({
+                success: !!(generated.excelPath || generated.pdfPath),
+                category,
+                excelPath: generated.excelPath,
+                pdfPath: generated.pdfPath,
+                imagesFound: imageMap.size,
+                warnings: generated.warnings,
+            });
+        },
+        {
+            name: 'export_appliance_comparison',
+            description:
+                'Generate comparison files (Excel .xlsx AND PDF) for one appliance category. Pass the compared models (with features, reliability, energy rating, price ILS, warranty, value-for-money), a Hebrew summary, and Hebrew recommendations. Returns the file paths. Call once per appliance category.',
+            schema: z.object({
+                category: z.string().describe('Appliance category in Hebrew (e.g. \'מקרר\')'),
+                models: z.array(ModelSchema).describe('Models to include in the comparison file'),
+                summary: z.string().describe('Hebrew comparison summary to include in the file'),
+                recommendations: z.object({
+                    fromGivenBrands: z.array(z.string()).describe('Hebrew recommendations for the best models from the user-provided brands list'),
+                    fromAlternatives: z.array(z.string()).describe('Hebrew recommendations for the best models from alternative/competing brands'),
+                    overallBest: z.array(z.string()).describe('Hebrew overall best recommendations combining both given brands and alternatives'),
+                }).optional().describe('Hebrew recommendations organized in three sets'),
+            }),
         }
-    },
-    {
-        name: "export_appliance_comparison",
-        description: "Export a product comparison to Excel or PDF file. Takes structured product data and generates a formatted comparison document. Use this when the user wants to save or share a comparison.",
-        schema: z.object({
-            products: z.array(ProductSchema).describe("Products to compare"),
-            title: z.string().optional().describe("Title for the comparison document"),
-            format: z.enum(["excel", "pdf", "both"]).optional().describe("Export format (default: excel)"),
-        }),
-    }
-);
+    );

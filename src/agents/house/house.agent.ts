@@ -51,6 +51,7 @@ import { renderDiagramPage } from './tools/render-diagram-page.tool';
 import { setDiagramScale } from './tools/set-diagram-scale.tool';
 import { measureOnDiagram } from './tools/measure-on-diagram.tool';
 import { houseGlossary } from './tools/house-glossary.tool';
+import { LLM_BASE_URL } from '../../config';
 
 /**
  * Factory function that creates and returns a fully configured House agent.
@@ -63,19 +64,20 @@ export const createHouseAgent = (apiKey: string) => {
 
     // Generic model configuration — replace baseURL and apiKey with your
     // own OpenAI-compatible endpoint (e.g., local Ollama, vLLM, etc.).
-    const ollamaModel = new ChatOpenAI({
-        model: "gpt-oss-120b",
+    const model = new ChatOpenAI({
+        model: 'gpt-oss-120b',
         temperature: 0.3,
         maxRetries: 3,
         timeout: 60000,
-        apiKey: "ApiKey here",
+        openAIApiKey: apiKey,
+        apiKey: apiKey,
         configuration: {
-            baseURL: "enter your address here"
+            baseURL: LLM_BASE_URL
         }
     });
 
     const agent = createAgent({
-        model: ollamaModel,
+        model,
         checkpointer,
         systemPrompt: houseSystemPrompt,
         tools: [

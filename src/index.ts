@@ -1,131 +1,363 @@
-/**
- * ============================================================================
- * MAIN APPLICATION ENTRY POINT — Express REST API Server
- * ============================================================================
- *
- * This is the central hub of the multi-agent system. It creates an Express
- * HTTP server that exposes REST API endpoints for each AI agent:
- *
- *   POST /api/chef/image    — Chef agent (with optional image analysis)
- *   POST /api/stocks        — Stocks agent (financial analysis)
- *   POST /api/mg4           — MG-4 car manual Q&A agent
- *   POST /api/ioniq6        — IONIQ 6 car manual Q&A agent
- *   POST /api/ask           — Router agent (auto-classifies and delegates)
- *   GET  /api-docs          — Swagger UI for interactive API documentation
- *
- * REQUEST FLOW:
- * ─────────────
- * 1. Client sends POST with `{ apiKey, message }` (and optionally `imageBase64`).
- * 2. The handler creates the appropriate LangGraph agent via its factory function.
- * 3. The agent is invoked/streamed with the user's message.
- * 4. The agent's ReAct loop runs: LLM → tool calls → LLM → ... → final answer.
- * 5. The response is saved to disk (outputs/) for debugging/auditing.
- * 6. The structured response is returned to the client as JSON.
- *
- * STREAMING vs INVOKE:
- * - Chef agent uses `.invoke()` — single call, waits for full response.
- * - Stocks, MG-4, IONIQ-6 use `.stream()` — iterates over each step of
- *   the agent loop, logging tool calls in real time. The final chunk
- *   contains the complete response.
- *
- * ROUTER ENDPOINT (/api/ask):
- * The router endpoint first classifies the question using the router agent,
- * then delegates to the appropriate specialist agent. This lets clients
- * send any question without knowing which agent handles it.
- * ============================================================================
- */
+import 'dotenv/config';
+import express from 'express';
+import multer from 'multer';
 
-// Express — Node.js web framework for HTTP server and route handling.
-import express from "express";
-
-// LangChain imports (ChatOpenAI and HumanMessage are used for direct model calls
-// in some endpoints, though most logic is encapsulated in agent modules).
-import { ChatOpenAI } from "@langchain/openai";
-import { HumanMessage } from "@langchain/core/messages";
-
-// Agent factory functions — each creates a configured LangGraph agent.
+import { ChatOpenAI } from '@langchain/openai';
+import { HumanMessage } from '@langchain/core/messages';
 import {createChefAgent} from './agents/chef/chef.agent';
+import {createGitHubAgent, createPrImpactAgent, createRepoQAAgent} from './agents/github/github.agent';
+import {createConfluenceAgent} from './agents/confluence/confluence.agent';
 import {createStocksAgent} from './agents/stocks/stocks.agent';
+import {createBasicAgent} from './agents/basic-agent/basic.agent';
 import {createMG4Agent} from './agents/MG-4/mg4.agent';
 import {createIONIQ6Agent} from './agents/IONIQ-6/ioniq6.agent';
-
-// Output saving utilities — persist request/response to disk for debugging.
 import {saveAgentOutput} from './utils/save-output';
+import {saveGitHubAgentOutput} from './utils/save-github-output';
 import {saveMG4Output} from './utils/save-mg4-output';
 import {saveIONIQ6Output} from './utils/save-ioniq6-output';
-
-// Swagger UI setup for interactive API documentation at /api-docs.
+import {createMortgageAgent} from './agents/mortgage/mortgage.agent';
+import {createHouseAgent} from './agents/house/house.agent';
+import {createAppliancesAgent} from './agents/appliances/appliances.agent';
+import {createSlideGeneratorAgent} from './agents/slide-generator/slide-generator.agent';
+import {saveMortgageOutput} from './utils/save-mortgage-output';
+import {saveHouseOutput} from './utils/save-house-output';
+import {saveAppliancesOutput} from './utils/save-appliances-output';
+import {saveSlideGeneratorOutput} from './utils/save-slide-generator-output';
+import {createOutputDir} from './utils/save-output-base';
 import {setupSwagger} from './swagger';
-
-// Router agent — classifies questions and routes to the right specialist.
-import {classifyQuestion} from './agents/router/router.agent';
-
-// Console logging colors for readable server output.
 import {LogColors} from './utils/log-colors.util';
+import {getAccessToken} from './utils/oauth-auth.util';
+import {LLM_BASE_URL, PRIMARY_GITHUB} from './config';
+import {startLogCapture, saveLogCapture} from './utils/log-capture.util';
+import {produceUnifiedOutput, produceUnifiedOutputFromPaths} from './agents/appliances/merge/produce-unified-output';
 
-// 3. Create the Express application instance.
 const app = express();
 
-const apiKey = "OGU0OWU2ZDktOTA2Ny00NjQzLTg4MTQtZWJmNjQ2OGIyMmVl";
-
-// 4. Tell Express to parse JSON request bodies.
-//    Without this, req.body would be undefined when clients send JSON.
-app.use(express.json({ limit: "50mb" }));
+app.use(express.json({ limit: '50mb' }));
 
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  if (req.method === "OPTIONS") {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
     res.sendStatus(204);
     return;
   }
   next();
 });
 
-// 5. Set up Swagger UI at /api-docs (also serves as the root entry point).
 setupSwagger(app);
 
-// 6. Define the port the server will listen on.
 const PORT = 3000;
 
-app.post("/api/chef/image", async (req, res) => {
-  const { apiKey, message, imageBase64 } = req.body;
+// ─── General Chat ────────────────────────────────────────────────────────────
+
+app.post('/api/chat', async (req, res) => {
+  const { message, model, apiKey, stream, temperature } = req.body;
+  if (!message || !model || !apiKey) {
+    res.status(400).json({
+      error: 'Missing required parameters: message, model, and apiKey are required',
+    });
+    return;
+  }
+
+  try {
+    const llm = new ChatOpenAI({
+      model: model,
+      temperature: temperature ?? 0.8,
+      streaming: stream ?? false,
+      openAIApiKey: apiKey,
+      apiKey: apiKey,
+      configuration: {
+        baseURL: LLM_BASE_URL,
+      },
+    });
+
+    if (stream) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+
+      const streamResponse = await llm.stream([new HumanMessage(message)]);
+
+      for await (const chunk of streamResponse) {
+        res.write(`data: ${JSON.stringify({ content: chunk.content })}\n\n`);
+      }
+
+      res.write('data: [DONE]\n\n');
+      res.end();
+    } else {
+      const response = await llm.invoke([new HumanMessage(message)]);
+
+      res.json({
+        content: response.content,
+        model: model,
+      });
+    }
+  } catch (error: any) {
+    console.error('Error calling the LLM:', error);
+    res.status(500).json({
+      error: 'Failed to get response from LLM',
+      details: error.message,
+    });
+  }
+});
+
+// ─── Chef ────────────────────────────────────────────────────────────────────
+
+app.post('/api/chef/image', async (req, res) => {
+  const { message, imageBase64 } = req.body;
+  const capture = startLogCapture();
 
   console.log(`${LogColors.YELLOW}[chef-agent]${LogColors.RESET} Received request:`, message?.slice(0, 100));
-  const chef = createChefAgent(apiKey, imageBase64);
+  const apiToken = await getAccessToken();
+  const chef = createChefAgent(apiToken, imageBase64);
 
   console.log(`${LogColors.YELLOW}[chef-agent]${LogColors.RESET} Starting chef agent...`);
   const ret = await chef.invoke({
-    messages: [{role: "user", content: message}]
+    messages: [{role: 'user', content: message}]
   }, { configurable: { thread_id: `chef-${Date.now()}` } });
 
   console.log(`${LogColors.YELLOW}[chef-agent]${LogColors.RESET} Completed`);
-  saveAgentOutput("chef", { message, imageBase64: imageBase64 ? "[base64 image]" : undefined }, ret);
+  const outputDir = saveAgentOutput('chef', { message, imageBase64: imageBase64 ? '[base64 image]' : undefined }, ret);
+  saveLogCapture(capture, outputDir);
   res.json({
     content: ret,
-    model: "gpt-oss-120b",
+    model: 'gpt-oss-120b',
   });
 });
 
-app.post("/api/stocks/chat", async (req, res) => {
+// ─── GitHub ──────────────────────────────────────────────────────────────────
+
+app.post('/api/github/analyze', async (req, res) => {
+  const { message } = req.body;
+
+  if (!message) {
+    res.status(400).json({
+      error: 'Missing required parameters: message is required',
+    });
+    return;
+  }
+
+  const capture = startLogCapture();
+  try {
+    const apiToken = await getAccessToken();
+    const github = createGitHubAgent(apiToken);
+
+    console.log(`${LogColors.CYAN}[github-agent]${LogColors.RESET} Starting analysis...`);
+    const stream = await github.stream({
+      messages: [{role: 'user', content: message}]
+    }, { configurable: { thread_id: `github-${Date.now()}` }, recursionLimit: 100 });
+
+    let lastState: any = null;
+    let stepCount = 0;
+    for await (const chunk of stream) {
+      stepCount++;
+      const nodeNames = Object.keys(chunk);
+      console.log(`${LogColors.CYAN}[github-agent]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(', ')}]`);
+      lastState = chunk;
+    }
+    console.log(`${LogColors.CYAN}[github-agent]${LogColors.RESET} Completed in ${stepCount} steps`);
+    const outputDir = saveGitHubAgentOutput('github', { message }, lastState);
+    saveLogCapture(capture, outputDir);
+
+    res.json({
+      content: lastState,
+      model: 'gpt-oss-120b',
+    });
+  } catch (error: any) {
+    console.error(`${LogColors.BRIGHT_RED}[github-agent] Error:${LogColors.RESET}`, error);
+    capture.stop();
+    res.status(500).json({
+      error: 'Failed to analyze repository',
+      details: error.message,
+    });
+  }
+});
+
+app.post('/api/github/pr-impact', async (req, res) => {
+  const { owner, repo, prNumber, message, summaryVersion } = req.body;
+
+  console.log(`${LogColors.BRIGHT_MAGENTA}[pr-impact]${LogColors.RESET} Received request: owner=${owner}, repo=${repo}, PR=#${prNumber}`);
+
+  if (!owner || !repo || !prNumber) {
+    res.status(400).json({
+      error: 'Missing required parameters: owner, repo, and prNumber are required',
+    });
+    return;
+  }
+
+  const capture = startLogCapture();
+  try {
+    const apiToken = await getAccessToken();
+    const prImpact = createPrImpactAgent(apiToken, undefined, undefined, summaryVersion);
+
+    const prContext = `Analyze the impact of PR #${prNumber} in ${owner}/${repo}. Fetch the PR diff using owner="${owner}", repo="${repo}", prNumber=${prNumber}, then cross-reference the changes against all known repository summaries, and identify which endpoints, databases, or services are affected and who their consumers are.`;
+    const userMessage = message
+      ? `${prContext}\n\nAdditional instructions: ${message}`
+      : prContext;
+
+    console.log(`${LogColors.BRIGHT_MAGENTA}[pr-impact]${LogColors.RESET} Starting PR impact analysis...`);
+    const stream = await prImpact.stream({
+      messages: [{role: 'user', content: userMessage}]
+    }, { configurable: { thread_id: `pr-impact-${Date.now()}` }, recursionLimit: 100 });
+
+    let lastState: any = null;
+    let stepCount = 0;
+    for await (const chunk of stream) {
+      stepCount++;
+      const nodeNames = Object.keys(chunk);
+      console.log(`${LogColors.BRIGHT_MAGENTA}[pr-impact]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(', ')}]`);
+      lastState = chunk;
+    }
+    console.log(`${LogColors.BRIGHT_MAGENTA}[pr-impact]${LogColors.RESET} Completed in ${stepCount} steps`);
+    const outputDir = saveGitHubAgentOutput('pr-impact', { owner, repo, prNumber, message }, lastState);
+    saveLogCapture(capture, outputDir);
+
+    res.json({
+      content: lastState,
+      model: 'gpt-oss-120b',
+    });
+  } catch (error: any) {
+    console.error(`${LogColors.BRIGHT_RED}[pr-impact] Error:${LogColors.RESET}`, error);
+    capture.stop();
+    res.status(500).json({
+      error: 'Failed to analyze PR impact',
+      details: error.message,
+    });
+  }
+});
+
+app.post('/api/github/ask', async (req, res) => {
+  const { message } = req.body;
+
+  console.log(`${LogColors.BRIGHT_CYAN}[github-qa]${LogColors.RESET} Received question:`, message?.slice(0, 100));
+
+  if (!message) {
+    res.status(400).json({
+      error: 'Missing required parameter: message is required',
+    });
+    return;
+  }
+
+  const capture = startLogCapture();
+  try {
+    const apiToken = await getAccessToken();
+    const qa = createRepoQAAgent(apiToken);
+
+    console.log(`${LogColors.BRIGHT_CYAN}[github-qa]${LogColors.RESET} Starting repo Q&A agent...`);
+    const stream = await qa.stream({
+      messages: [{role: 'user', content: message}]
+    }, { configurable: { thread_id: `github-qa-${Date.now()}` }, recursionLimit: 100 });
+
+    let lastState: any = null;
+    let stepCount = 0;
+    for await (const chunk of stream) {
+      stepCount++;
+      const nodeNames = Object.keys(chunk);
+      console.log(`${LogColors.BRIGHT_CYAN}[github-qa]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(', ')}]`);
+      lastState = chunk;
+    }
+    console.log(`${LogColors.BRIGHT_CYAN}[github-qa]${LogColors.RESET} Completed in ${stepCount} steps`);
+    const outputDir = saveGitHubAgentOutput('github-qa', { message }, lastState);
+    saveLogCapture(capture, outputDir);
+
+    res.json({
+      content: lastState,
+      model: 'gpt-oss-120b',
+    });
+  } catch (error: any) {
+    console.error(`${LogColors.BRIGHT_RED}[github-qa] Error:${LogColors.RESET}`, error);
+    capture.stop();
+    res.status(500).json({
+      error: 'Failed to answer question about repository',
+      details: error.message,
+    });
+  }
+});
+
+// ─── Confluence ──────────────────────────────────────────────────────────────
+
+app.post('/api/confluence/ask', async (req, res) => {
+  const { message } = req.body;
+
+  console.log(`${LogColors.BRIGHT_GREEN}[confluence-agent]${LogColors.RESET} Received question:`, message);
+
+  if (!message) {
+    res.status(400).json({
+      error: 'Missing required parameter: message is required',
+    });
+    return;
+  }
+
+  const capture = startLogCapture();
+  try {
+    const apiToken = await getAccessToken();
+    const confluence = createConfluenceAgent(apiToken);
+
+    console.log(`${LogColors.BRIGHT_GREEN}[confluence-agent]${LogColors.RESET} Starting Confluence search...`);
+    const stream = await confluence.stream({
+      messages: [{role: 'user', content: message}]
+    }, { configurable: { thread_id: `confluence-${Date.now()}` }, recursionLimit: 30 });
+
+    let lastState: any = null;
+    let stepCount = 0;
+    let hitRecursionLimit = false;
+    try {
+      for await (const chunk of stream) {
+        stepCount++;
+        const nodeNames = Object.keys(chunk);
+        console.log(`${LogColors.BRIGHT_GREEN}[confluence-agent]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(', ')}]`);
+        lastState = chunk;
+      }
+    } catch (streamError: any) {
+      if (streamError?.lc_error_code === 'GRAPH_RECURSION_LIMIT') {
+        hitRecursionLimit = true;
+        console.warn(`${LogColors.BRIGHT_GREEN}[confluence-agent]${LogColors.RESET} Hit recursion limit at step ${stepCount}, returning partial results`);
+      } else {
+        throw streamError;
+      }
+    }
+    console.log(`${LogColors.BRIGHT_GREEN}[confluence-agent]${LogColors.RESET} Completed in ${stepCount} steps${hitRecursionLimit ? ' (hit recursion limit)' : ''}`);
+    const outputDir = saveAgentOutput('confluence', { message }, lastState);
+    saveLogCapture(capture, outputDir);
+
+    res.json({
+      content: lastState,
+      model: 'gpt-oss-120b',
+      ...(hitRecursionLimit && { warning: 'Agent hit recursion limit; response may be incomplete' }),
+    });
+  } catch (error: any) {
+    console.error(`${LogColors.BRIGHT_RED}[confluence-agent] Error:${LogColors.RESET}`, error);
+    capture.stop();
+    res.status(500).json({
+      error: 'Failed to query Confluence',
+      details: error.message,
+    });
+  }
+});
+
+// ─── Stocks ──────────────────────────────────────────────────────────────────
+
+app.post('/api/stocks/chat', async (req, res) => {
   const { apiKey, message } = req.body;
 
   console.log(`${LogColors.BRIGHT_YELLOW}[stocks-agent]${LogColors.RESET} Received request:`, message?.slice(0, 100));
 
   if (!apiKey || !message) {
     res.status(400).json({
-      error: "Missing required parameters: apiKey and message are required",
+      error: 'Missing required parameters: apiKey and message are required',
     });
     return;
   }
 
+  const capture = startLogCapture();
   try {
     const stocks = createStocksAgent(apiKey);
 
     console.log(`${LogColors.BRIGHT_YELLOW}[stocks-agent]${LogColors.RESET} Starting stocks agent...`);
     const stream = await stocks.stream({
-      messages: [{role: "user", content: message}]
+      messages: [{role: 'user', content: message}]
     }, { configurable: { thread_id: `stocks-${Date.now()}` }, recursionLimit: 100 });
 
     let lastState: any = null;
@@ -133,43 +365,49 @@ app.post("/api/stocks/chat", async (req, res) => {
     for await (const chunk of stream) {
       stepCount++;
       const nodeNames = Object.keys(chunk);
-      console.log(`${LogColors.BRIGHT_YELLOW}[stocks-agent]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(", ")}]`);
+      console.log(`${LogColors.BRIGHT_YELLOW}[stocks-agent]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(', ')}]`);
       lastState = chunk;
     }
     console.log(`${LogColors.BRIGHT_YELLOW}[stocks-agent]${LogColors.RESET} Completed in ${stepCount} steps`);
-    saveAgentOutput("stocks", { message }, lastState);
+    const outputDir = saveAgentOutput('stocks', { message }, lastState);
+    saveLogCapture(capture, outputDir);
 
     res.json({
       content: lastState,
-      model: "gpt-oss-120b",
+      model: 'gpt-oss-120b',
     });
   } catch (error: any) {
     console.error(`${LogColors.BRIGHT_RED}[stocks-agent] Error:${LogColors.RESET}`, error);
+    capture.stop();
     res.status(500).json({
-      error: "Failed to get response from stocks agent",
+      error: 'Failed to get response from stocks agent',
       details: error.message,
     });
   }
 });
 
-app.post("/api/mg4/ask", async (req, res) => {
+// ─── MG-4 ────────────────────────────────────────────────────────────────────
+
+app.post('/api/mg4/ask', async (req, res) => {
   const { message } = req.body;
 
   console.log(`${LogColors.MAGENTA}[mg4-agent]${LogColors.RESET} Received question:`, message?.slice(0, 100));
 
   if (!message) {
     res.status(400).json({
-      error: "Missing required parameters: apiKey and message are required",
+      error: 'Missing required parameters: message is required',
     });
     return;
   }
 
+  const capture = startLogCapture();
   try {
-    const mg4 = createMG4Agent(apiKey);
+    const apiToken = await getAccessToken();
+    const mg4 = createMG4Agent(apiToken);
 
     console.log(`${LogColors.MAGENTA}[mg4-agent]${LogColors.RESET} Starting MG-4 agent...`);
     const stream = await mg4.stream({
-      messages: [{role: "user", content: message}]
+      messages: [{role: 'user', content: message}]
     }, { configurable: { thread_id: `mg4-${Date.now()}` }, recursionLimit: 100 });
 
     let lastState: any = null;
@@ -177,44 +415,49 @@ app.post("/api/mg4/ask", async (req, res) => {
     for await (const chunk of stream) {
       stepCount++;
       const nodeNames = Object.keys(chunk);
-      console.log(`${LogColors.MAGENTA}[mg4-agent]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(", ")}]`);
+      console.log(`${LogColors.MAGENTA}[mg4-agent]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(', ')}]`);
       lastState = chunk;
     }
     console.log(`${LogColors.MAGENTA}[mg4-agent]${LogColors.RESET} Completed in ${stepCount} steps`);
-    const result = saveMG4Output({ message }, lastState);
+    const mg4Result = saveMG4Output({ message }, lastState);
+    saveLogCapture(capture, mg4Result?.outputDir ?? null);
 
     res.json({
       content: lastState,
-      model: "gpt-oss-120b",
-      markdown: result?.markdown ?? null,
+      model: 'gpt-oss-120b',
     });
   } catch (error: any) {
     console.error(`${LogColors.BRIGHT_RED}[mg4-agent] Error:${LogColors.RESET}`, error);
+    capture.stop();
     res.status(500).json({
-      error: "Failed to get response from MG-4 agent",
+      error: 'Failed to get response from MG-4 agent',
       details: error.message,
     });
   }
 });
 
-app.post("/api/ioniq6/ask", async (req, res) => {
+// ─── IONIQ 6 ─────────────────────────────────────────────────────────────────
+
+app.post('/api/ioniq6/ask', async (req, res) => {
   const { message } = req.body;
 
   console.log(`${LogColors.GREEN}[ioniq6-agent]${LogColors.RESET} Received question:`, message?.slice(0, 100));
 
   if (!message) {
     res.status(400).json({
-      error: "Missing required parameter: message is required",
+      error: 'Missing required parameter: message is required',
     });
     return;
   }
 
+  const capture = startLogCapture();
   try {
-    const ioniq6 = createIONIQ6Agent(apiKey);
+    const apiToken = await getAccessToken();
+    const ioniq6 = createIONIQ6Agent(apiToken);
 
     console.log(`${LogColors.GREEN}[ioniq6-agent]${LogColors.RESET} Starting IONIQ 6 agent...`);
     const stream = await ioniq6.stream({
-      messages: [{role: "user", content: message}]
+      messages: [{role: 'user', content: message}]
     }, { configurable: { thread_id: `ioniq6-${Date.now()}` }, recursionLimit: 100 });
 
     let lastState: any = null;
@@ -222,134 +465,323 @@ app.post("/api/ioniq6/ask", async (req, res) => {
     for await (const chunk of stream) {
       stepCount++;
       const nodeNames = Object.keys(chunk);
-      console.log(`${LogColors.GREEN}[ioniq6-agent]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(", ")}]`);
+      console.log(`${LogColors.GREEN}[ioniq6-agent]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(', ')}]`);
       lastState = chunk;
     }
     console.log(`${LogColors.GREEN}[ioniq6-agent]${LogColors.RESET} Completed in ${stepCount} steps`);
-    const result = saveIONIQ6Output({ message }, lastState);
+    const ioniq6Result = saveIONIQ6Output({ message }, lastState);
+    saveLogCapture(capture, ioniq6Result?.outputDir ?? null);
 
     res.json({
       content: lastState,
-      model: "gpt-oss-120b",
-      markdown: result?.markdown ?? null,
+      model: 'gpt-oss-120b',
     });
   } catch (error: any) {
     console.error(`${LogColors.BRIGHT_RED}[ioniq6-agent] Error:${LogColors.RESET}`, error);
+    capture.stop();
     res.status(500).json({
-      error: "Failed to get response from IONIQ 6 agent",
+      error: 'Failed to get response from IONIQ 6 agent',
       details: error.message,
     });
   }
 });
 
-app.post("/api/ask", async (req, res) => {
-  const { message, imageBase64 } = req.body;
+// ─── Mortgage ────────────────────────────────────────────────────────────────
 
-  console.log(`${LogColors.CYAN}[router]${LogColors.RESET} Received question:`, message?.slice(0, 100));
+app.post('/api/mortgage/ask', async (req, res) => {
+  const { message } = req.body;
+
+  console.log(`${LogColors.BRIGHT_CYAN}[mortgage-agent]${LogColors.RESET} Received question:`, message?.slice(0, 100));
 
   if (!message) {
     res.status(400).json({
-      error: "Missing required parameter: message is required",
+      error: 'Missing required parameter: message is required',
     });
     return;
   }
 
+  const capture = startLogCapture();
   try {
-    // Step 1: Classify the question
-    console.log(`${LogColors.CYAN}[router]${LogColors.RESET} Classifying question...`);
-    const classification = await classifyQuestion(apiKey, message);
-    console.log(`${LogColors.CYAN}[router]${LogColors.RESET} Routed to: ${classification.agent} (${classification.reasoning})`);
+    const apiToken = await getAccessToken();
+    const mortgage = createMortgageAgent(apiToken);
 
-    if (classification.agent === 'unknown') {
-      res.status(400).json({
-        error: "Could not determine which agent to use. Please be more specific or mention the topic (e.g. MG-4, IONIQ 6, stocks, cooking).",
-        reasoning: classification.reasoning,
-      });
-      return;
+    console.log(`${LogColors.BRIGHT_CYAN}[mortgage-agent]${LogColors.RESET} Starting mortgage agent...`);
+    const stream = await mortgage.stream({
+      messages: [{role: 'user', content: message}]
+    }, { configurable: { thread_id: `mortgage-${Date.now()}` }, recursionLimit: 100 });
+
+    let lastState: any = null;
+    let stepCount = 0;
+    for await (const chunk of stream) {
+      stepCount++;
+      const nodeNames = Object.keys(chunk);
+      console.log(`${LogColors.BRIGHT_CYAN}[mortgage-agent]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(', ')}]`);
+      lastState = chunk;
     }
+    console.log(`${LogColors.BRIGHT_CYAN}[mortgage-agent]${LogColors.RESET} Completed in ${stepCount} steps`);
+    const outputDir = saveMortgageOutput({ message }, lastState);
+    saveLogCapture(capture, outputDir);
 
-    // Step 2: Delegate to the chosen agent
-    let result: any;
-
-    switch (classification.agent) {
-      case 'chef': {
-        const chef = createChefAgent(apiKey, imageBase64);
-        console.log(`${LogColors.CYAN}[router]${LogColors.RESET} Delegating to chef agent...`);
-        result = await chef.invoke({
-          messages: [{ role: "user", content: message }]
-        }, { configurable: { thread_id: `router-chef-${Date.now()}` } });
-        saveAgentOutput("chef", { message, imageBase64: imageBase64 ? "[base64 image]" : undefined }, result);
-        res.json({ routedTo: "chef", content: result, model: "gpt-oss-120b" });
-        break;
-      }
-      case 'stocks': {
-        const stocks = createStocksAgent(apiKey);
-        console.log(`${LogColors.CYAN}[router]${LogColors.RESET} Delegating to stocks agent...`);
-        const stockStream = await stocks.stream({
-          messages: [{ role: "user", content: message }]
-        }, { configurable: { thread_id: `router-stocks-${Date.now()}` }, recursionLimit: 100 });
-        let lastState: any = null;
-        let stepCount = 0;
-        for await (const chunk of stockStream) {
-          stepCount++;
-          const nodeNames = Object.keys(chunk);
-          console.log(`${LogColors.CYAN}[router→stocks]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(", ")}]`);
-          lastState = chunk;
-        }
-        saveAgentOutput("stocks", { message }, lastState);
-        res.json({ routedTo: "stocks", content: lastState, model: "gpt-oss-120b" });
-        break;
-      }
-      case 'mg4': {
-        const mg4 = createMG4Agent(apiKey);
-        console.log(`${LogColors.CYAN}[router]${LogColors.RESET} Delegating to MG-4 agent...`);
-        const mg4Stream = await mg4.stream({
-          messages: [{ role: "user", content: message }]
-        }, { configurable: { thread_id: `router-mg4-${Date.now()}` }, recursionLimit: 100 });
-        let mg4Last: any = null;
-        let mg4Steps = 0;
-        for await (const chunk of mg4Stream) {
-          mg4Steps++;
-          const nodeNames = Object.keys(chunk);
-          console.log(`${LogColors.CYAN}[router→mg4]${LogColors.RESET} Step ${mg4Steps}: nodes=[${nodeNames.join(", ")}]`);
-          mg4Last = chunk;
-        }
-        const mg4Result = saveMG4Output({ message }, mg4Last);
-        res.json({ routedTo: "mg4", content: mg4Last, model: "gpt-oss-120b", markdown: mg4Result?.markdown ?? null });
-        break;
-      }
-      case 'ioniq6': {
-        const ioniq6 = createIONIQ6Agent(apiKey);
-        console.log(`${LogColors.CYAN}[router]${LogColors.RESET} Delegating to IONIQ 6 agent...`);
-        const ioniq6Stream = await ioniq6.stream({
-          messages: [{ role: "user", content: message }]
-        }, { configurable: { thread_id: `router-ioniq6-${Date.now()}` }, recursionLimit: 100 });
-        let ioniq6Last: any = null;
-        let ioniq6Steps = 0;
-        for await (const chunk of ioniq6Stream) {
-          ioniq6Steps++;
-          const nodeNames = Object.keys(chunk);
-          console.log(`${LogColors.CYAN}[router→ioniq6]${LogColors.RESET} Step ${ioniq6Steps}: nodes=[${nodeNames.join(", ")}]`);
-          ioniq6Last = chunk;
-        }
-        const ioniq6Result = saveIONIQ6Output({ message }, ioniq6Last);
-        res.json({ routedTo: "ioniq6", content: ioniq6Last, model: "gpt-oss-120b", markdown: ioniq6Result?.markdown ?? null });
-        break;
-      }
-    }
-
-    console.log(`${LogColors.CYAN}[router]${LogColors.RESET} Completed — served by ${classification.agent}`);
+    res.json({
+      content: lastState,
+      model: 'gpt-oss-120b',
+    });
   } catch (error: any) {
-    console.error(`${LogColors.BRIGHT_RED}[router] Error:${LogColors.RESET}`, error);
+    console.error(`${LogColors.BRIGHT_RED}[mortgage-agent] Error:${LogColors.RESET}`, error);
+    capture.stop();
     res.status(500).json({
-      error: "Failed to process your question",
+      error: 'Failed to get response from mortgage agent',
       details: error.message,
     });
   }
 });
 
-// 12. Start the server.
-//     app.listen() tells Express to begin accepting HTTP connections on the given port.
+// ─── House ───────────────────────────────────────────────────────────────────
+
+app.post('/api/house/ask', async (req, res) => {
+  const { message } = req.body;
+
+  console.log(`${LogColors.BRIGHT_BLUE}[house-agent]${LogColors.RESET} Received question:`, message?.slice(0, 100));
+
+  if (!message) {
+    res.status(400).json({
+      error: 'Missing required parameter: message is required',
+    });
+    return;
+  }
+
+  const capture = startLogCapture();
+  try {
+    const apiToken = await getAccessToken();
+    const house = createHouseAgent(apiToken);
+
+    console.log(`${LogColors.BRIGHT_BLUE}[house-agent]${LogColors.RESET} Starting house agent...`);
+    const stream = await house.stream({
+      messages: [{role: 'user', content: message}]
+    }, { configurable: { thread_id: `house-${Date.now()}` }, recursionLimit: 100 });
+
+    let lastState: any = null;
+    let stepCount = 0;
+    for await (const chunk of stream) {
+      stepCount++;
+      const nodeNames = Object.keys(chunk);
+      console.log(`${LogColors.BRIGHT_BLUE}[house-agent]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(', ')}]`);
+      lastState = chunk;
+    }
+    console.log(`${LogColors.BRIGHT_BLUE}[house-agent]${LogColors.RESET} Completed in ${stepCount} steps`);
+    const outputDir = saveHouseOutput({ message }, lastState);
+    saveLogCapture(capture, outputDir);
+
+    res.json({
+      content: lastState,
+      model: 'gpt-oss-120b',
+    });
+  } catch (error: any) {
+    console.error(`${LogColors.BRIGHT_RED}[house-agent] Error:${LogColors.RESET}`, error);
+    capture.stop();
+    res.status(500).json({
+      error: 'Failed to get response from house agent',
+      details: error.message,
+    });
+  }
+});
+
+// ─── Appliances ──────────────────────────────────────────────────────────────
+
+app.post('/api/appliances/ask', async (req, res) => {
+  const { message } = req.body;
+
+  console.log(`${LogColors.BLUE}[appliances-agent]${LogColors.RESET} Received question:`, message?.slice(0, 100));
+
+  if (!message) {
+    res.status(400).json({
+      error: 'Missing required parameter: message',
+    });
+    return;
+  }
+
+  const capture = startLogCapture();
+  try {
+    const apiToken = await getAccessToken();
+    const outputDir = createOutputDir('appliances', message, 'save-appliances-output');
+    const appliances = createAppliancesAgent(apiToken, outputDir);
+
+    console.log(`${LogColors.BLUE}[appliances-agent]${LogColors.RESET} Starting appliances agent...`);
+    const stream = await appliances.stream({
+      messages: [{role: 'user', content: message}]
+    }, { configurable: { thread_id: `appliances-${Date.now()}` }, recursionLimit: 100 });
+
+    let lastState: any = null;
+    let stepCount = 0;
+    for await (const chunk of stream) {
+      stepCount++;
+      const nodeNames = Object.keys(chunk);
+      console.log(`${LogColors.BLUE}[appliances-agent]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(', ')}]`);
+      lastState = chunk;
+    }
+    console.log(`${LogColors.BLUE}[appliances-agent]${LogColors.RESET} Completed in ${stepCount} steps`);
+    saveAppliancesOutput({ message }, lastState, outputDir);
+    saveLogCapture(capture, outputDir);
+
+    res.json({
+      content: lastState,
+      model: 'gpt-oss-120b',
+    });
+  } catch (error: any) {
+    console.error(`${LogColors.BRIGHT_RED}[appliances-agent] Error:${LogColors.RESET}`, error);
+    capture.stop();
+    res.status(500).json({
+      error: 'Failed to get response from appliances agent',
+      details: error.message,
+    });
+  }
+});
+
+// ─── Appliances merge endpoints ─────────────────────────────────────────────
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+app.post('/api/appliances/merge', upload.array('files', 20), async (req, res) => {
+  const files = req.files as Express.Multer.File[] | undefined;
+  const category = req.body?.category as string | undefined;
+
+  console.log(`${LogColors.BLUE}[appliances-merge]${LogColors.RESET} Received ${files?.length ?? 0} files for merge`);
+
+  if (!files || files.length === 0) {
+    res.status(400).json({ error: 'Missing required files. Send one or more .xlsx, .pdf, or .md files in the "files" field.' });
+    return;
+  }
+
+  try {
+    const apiToken = await getAccessToken();
+    const inputs = files.map(f => ({ buffer: f.buffer, filename: f.originalname }));
+    const result = await produceUnifiedOutput(inputs, apiToken, category || undefined);
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error(`${LogColors.BRIGHT_RED}[appliances-merge] Error:${LogColors.RESET}`, error);
+    res.status(500).json({
+      error: 'Failed to merge appliance files',
+      details: error.message,
+    });
+  }
+});
+
+app.post('/api/appliances/merge-local', async (req, res) => {
+  const { paths, category } = req.body;
+
+  console.log(`${LogColors.BLUE}[appliances-merge-local]${LogColors.RESET} Received ${paths?.length ?? 0} file paths for merge`);
+
+  if (!Array.isArray(paths) || paths.length === 0) {
+    res.status(400).json({ error: 'Missing required parameter: paths (array of file paths)' });
+    return;
+  }
+
+  try {
+    const apiToken = await getAccessToken();
+    const result = await produceUnifiedOutputFromPaths(paths, apiToken, category || undefined);
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error(`${LogColors.BRIGHT_RED}[appliances-merge-local] Error:${LogColors.RESET}`, error);
+    res.status(500).json({
+      error: 'Failed to merge appliance files',
+      details: error.message,
+    });
+  }
+});
+
+// ─── Slide Generator ─────────────────────────────────────────────────────────
+
+type SlideGenSession = { agent: ReturnType<typeof createSlideGeneratorAgent>; outputDir: string };
+const slideGenSessions = new Map<string, SlideGenSession>();
+
+app.post('/api/slidegen/ask', async (req, res) => {
+  const { message, threadId, repoUrl, attachedFiles } = req.body;
+
+  console.log(`${LogColors.BRIGHT_MAGENTA}[slidegen-agent]${LogColors.RESET} Received request:`, message?.slice(0, 100), threadId ? `(thread=${threadId})` : '', attachedFiles?.length ? `(${attachedFiles.length} file(s) attached)` : '');
+
+  if (!message) {
+    res.status(400).json({ error: 'Missing required parameter: message' });
+    return;
+  }
+
+  const capture = startLogCapture();
+  try {
+    const existing = threadId ? slideGenSessions.get(threadId) : undefined;
+    const thread = threadId || `slidegen-${Date.now()}`;
+
+    let agent: ReturnType<typeof createSlideGeneratorAgent>;
+    let outputDir: string;
+    if (existing) {
+      agent = existing.agent;
+      outputDir = existing.outputDir;
+      console.log(`${LogColors.BRIGHT_MAGENTA}[slidegen-agent]${LogColors.RESET} Resuming session for thread=${thread}`);
+    } else {
+      const apiToken = await getAccessToken();
+      outputDir = createOutputDir('slidegen', message, 'save-slide-generator-output');
+      agent = createSlideGeneratorAgent(apiToken, {
+        outputDir,
+        githubToken: process.env.GITHUB_TOKEN || '',
+        githubBaseUrl: PRIMARY_GITHUB?.apiUrl,
+        publicGithubToken: process.env.PUBLIC_GITHUB_TOKEN || undefined,
+      });
+      slideGenSessions.set(thread, { agent, outputDir });
+    }
+
+    let userContent = message;
+    if (repoUrl) {
+      userContent += `\n\n[Code base to analyze and integrate into the deck: ${repoUrl}]`;
+    }
+    if (Array.isArray(attachedFiles) && attachedFiles.length > 0) {
+      const listing = attachedFiles.map((f: string) => `  - ${f}`).join('\n');
+      userContent += `\n\n[Attached files (call parse_attached_file for each):\n${listing}\n]`;
+    }
+    userContent += `\n\n[SYSTEM: This is a one-shot REST API call — the caller CANNOT reply to follow-up questions. ` +
+      `Do NOT set needsClarification=true. Use sensible defaults for anything not specified and build the deck immediately. ` +
+      `You MUST call generate_pptx (or generate_revealjs) and return a completed presentation file.]`;
+
+    console.log(`${LogColors.BRIGHT_MAGENTA}[slidegen-agent]${LogColors.RESET} Starting slide generator agent...`);
+    const stream = await agent.stream({
+      messages: [{role: 'user', content: userContent}]
+    }, { configurable: { thread_id: thread }, recursionLimit: 100 });
+
+    let lastState: any = null;
+    let stepCount = 0;
+    for await (const chunk of stream) {
+      stepCount++;
+      const nodeNames = Object.keys(chunk);
+      console.log(`${LogColors.BRIGHT_MAGENTA}[slidegen-agent]${LogColors.RESET} Step ${stepCount}: nodes=[${nodeNames.join(', ')}]`);
+      lastState = chunk;
+    }
+    console.log(`${LogColors.BRIGHT_MAGENTA}[slidegen-agent]${LogColors.RESET} Completed in ${stepCount} steps`);
+    saveSlideGeneratorOutput({ message, threadId: thread, repoUrl, attachedFiles }, lastState, outputDir);
+    saveLogCapture(capture, outputDir);
+
+    res.json({
+      content: lastState,
+      threadId: thread,
+      model: 'gpt-oss-120b',
+    });
+  } catch (error: any) {
+    console.error(`${LogColors.BRIGHT_RED}[slidegen-agent] Error:${LogColors.RESET}`, error);
+    capture.stop();
+    res.status(500).json({
+      error: 'Failed to generate slides',
+      details: error.message,
+    });
+  }
+});
+
+
+// ─── Start server ────────────────────────────────────────────────────────────
+
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
   console.log(`Swagger UI available at http://localhost:${PORT}/api-docs`);

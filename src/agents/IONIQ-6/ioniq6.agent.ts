@@ -38,11 +38,12 @@ import { ioniq6SystemPrompt } from './ioniq6.prompt';
 import { searchManuals } from './tools/search-manuals.tool';
 import { listManuals } from './tools/list-manuals.tool';
 import { getTips } from './tools/get-tips.tool';
+import { LLM_BASE_URL } from '../../config';
 
 /**
  * Factory function that creates and returns a fully configured IONIQ 6 agent.
  *
- * @param apiKey - API key for the Dell GenAI endpoint (OpenAI-compatible).
+ * @param apiKey - API key for the LLM endpoint (OpenAI-compatible).
  * @returns A LangGraph `CompiledStateGraph` (agent) that can be streamed.
  */
 export const createIONIQ6Agent = (apiKey: string) => {
@@ -53,21 +54,22 @@ export const createIONIQ6Agent = (apiKey: string) => {
     // own OpenAI-compatible endpoint (e.g., local Ollama, vLLM, etc.).
     // temperature=0.3 for factual, manual-grounded answers.
     // timeout=60000 (60s) for PDF parsing on first load.
-    const ollamaModel = new ChatOpenAI({
-        model: "gpt-oss-120b",
+    const model = new ChatOpenAI({
+        model: 'gpt-oss-120b',
         temperature: 0.3,
         maxRetries: 3,
         timeout: 60000,
-        apiKey: "ApiKey here",
+        openAIApiKey: apiKey,
+        apiKey: apiKey,
         configuration: {
-            baseURL: "enter your address here"
+            baseURL: LLM_BASE_URL
         }
     });
 
     // Assemble the LangGraph agent with PDF-based tools and the IONIQ 6
     // system prompt. No responseFormat — returns free-form markdown answers.
     const agent = createAgent({
-        model: ollamaModel,
+        model,
         checkpointer,
         systemPrompt: ioniq6SystemPrompt,
         tools: [searchManuals, listManuals, getTips],

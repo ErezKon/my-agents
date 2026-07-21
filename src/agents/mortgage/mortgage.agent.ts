@@ -54,6 +54,7 @@ import { compareMortgageOffers } from './tools/compare-mortgage-offers.tool';
 import { fetchCurrentRates } from './tools/fetch-current-rates.tool';
 import { mortgageGlossary } from './tools/mortgage-glossary.tool';
 import { mortgageCalculator } from './tools/mortgage-calculator.tool';
+import { LLM_BASE_URL } from '../../config';
 
 /**
  * Factory function that creates and returns a fully configured Mortgage agent.
@@ -69,14 +70,15 @@ export const createMortgageAgent = (apiKey: string) => {
     // own OpenAI-compatible endpoint (e.g., local Ollama, vLLM, etc.).
     // temperature=0.3 for precise, data-driven mortgage analysis.
     // timeout=60000 (60s) for PDF parsing on first load.
-    const ollamaModel = new ChatOpenAI({
-        model: "gpt-oss-120b",
+    const model = new ChatOpenAI({
+        model: 'gpt-oss-120b',
         temperature: 0.3,
         maxRetries: 3,
         timeout: 60000,
-        apiKey: "ApiKey here",
+        openAIApiKey: apiKey,
+        apiKey: apiKey,
         configuration: {
-            baseURL: "enter your address here"
+            baseURL: LLM_BASE_URL
         }
     });
 
@@ -84,7 +86,7 @@ export const createMortgageAgent = (apiKey: string) => {
     // prompt (defining the advisor's persona and response framework),
     // and the structured output schema ensuring consistent JSON responses.
     const agent = createAgent({
-        model: ollamaModel,
+        model,
         checkpointer,
         systemPrompt: mortgageSystemPrompt,
         responseFormat: MortgageAnswerSchema,

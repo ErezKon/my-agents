@@ -84,11 +84,12 @@ import {createGetDividendHistoryTool} from './tools/get-dividend-history.tool';
 import {createManageWatchlistTool} from './tools/manage-watchlist.tool';
 import {createGetCapabilitiesTool} from './tools/get-capabilities.tool';
 import {StocksResponseSchema} from './schemas/stocks-response.schema';
+import {LLM_BASE_URL} from '../../config';
 
 /**
  * Factory function that creates and returns a fully configured Stocks agent.
  *
- * @param apiKey - API key for the Dell GenAI endpoint (OpenAI-compatible).
+ * @param apiKey - API key for the LLM endpoint (OpenAI-compatible).
  * @returns A LangGraph `CompiledStateGraph` (agent) that can be streamed
  *   with `.stream()` to observe each tool-call step in real time.
  *
@@ -112,7 +113,7 @@ export const createStocksAgent = (apiKey: string) => {
         openAIApiKey: apiKey,
         apiKey: apiKey,
         configuration: {
-            baseURL: "https://genai-api-dev.dell.com/v1"
+            baseURL: LLM_BASE_URL
         }
     });
 

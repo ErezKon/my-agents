@@ -16,7 +16,7 @@
  * HOW IT WORKS (LangChain Concepts):
  * -----------------------------------
  * - **ChatOpenAI**: LangChain's wrapper around the OpenAI-compatible chat API.
- *   Here it points to a Dell internal GenAI endpoint via `baseURL`.
+ *   Here it points to an OpenAI-compatible endpoint via `baseURL`.
  *
  * - **withStructuredOutput(zodSchema)**: A LangChain method that constrains the
  *   LLM to always return JSON matching the given Zod schema. Internally it uses
@@ -35,6 +35,7 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { z } from 'zod';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
+import { LLM_BASE_URL } from '../../config';
 
 /**
  * Zod schema that defines the shape of the LLM's classification response.
@@ -83,7 +84,7 @@ Rules:
 /**
  * Classifies a user question and returns which specialist agent should handle it.
  *
- * @param apiKey - API key for the Dell GenAI endpoint (OpenAI-compatible).
+ * @param apiKey - API key for the LLM endpoint (OpenAI-compatible).
  * @param message - The raw user question text.
  * @returns An `AgentClassification` object with `agent` and `reasoning` fields.
  *
@@ -98,7 +99,7 @@ export const classifyQuestion = async (
     apiKey: string,
     message: string,
 ): Promise<AgentClassification> => {
-    // Create a ChatOpenAI instance pointing to the Dell GenAI endpoint.
+    // Create a ChatOpenAI instance pointing to the configured LLM endpoint.
     // temperature=0 ensures consistent, deterministic classification results.
     const model = new ChatOpenAI({
         model: 'gpt-oss-120b',
@@ -108,7 +109,7 @@ export const classifyQuestion = async (
         openAIApiKey: apiKey,
         apiKey: apiKey,
         configuration: {
-            baseURL: 'https://genai-api-dev.dell.com/v1',
+            baseURL: LLM_BASE_URL,
         },
     });
 

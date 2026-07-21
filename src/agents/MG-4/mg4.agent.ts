@@ -52,11 +52,12 @@ import { mg4SystemPrompt } from './mg4.prompt';
 import { searchManuals } from './tools/search-manuals.tool';
 import { listManuals } from './tools/list-manuals.tool';
 import { getTips } from './tools/get-tips.tool';
+import { LLM_BASE_URL } from '../../config';
 
 /**
  * Factory function that creates and returns a fully configured MG-4 agent.
  *
- * @param apiKey - API key for the Dell GenAI endpoint (OpenAI-compatible).
+ * @param apiKey - API key for the LLM endpoint (OpenAI-compatible).
  * @returns A LangGraph `CompiledStateGraph` (agent) that can be streamed
  *   with `.stream()` to observe each tool-call step.
  */
@@ -68,14 +69,15 @@ export const createMG4Agent = (apiKey: string) => {
     // own OpenAI-compatible endpoint (e.g., local Ollama, vLLM, etc.).
     // temperature=0.3 keeps answers factual and grounded in manual content.
     // timeout=60000 (60s) accounts for slow PDF parsing on first load.
-    const ollamaModel = new ChatOpenAI({
-        model: "gpt-oss-120b",
+    const model = new ChatOpenAI({
+        model: 'gpt-oss-120b',
         temperature: 0.3,
         maxRetries: 3,
         timeout: 60000,
-        apiKey: "ApiKey here",
+        openAIApiKey: apiKey,
+        apiKey: apiKey,
         configuration: {
-            baseURL: "enter your address here"
+            baseURL: LLM_BASE_URL
         }
     });
 
@@ -83,7 +85,7 @@ export const createMG4Agent = (apiKey: string) => {
     // system prompt (defines scope, citation format, language handling).
     // No responseFormat — the agent returns free-form markdown answers.
     const agent = createAgent({
-        model: ollamaModel,
+        model,
         checkpointer,
         systemPrompt: mg4SystemPrompt,
         tools: [searchManuals, listManuals, getTips],

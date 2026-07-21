@@ -1,83 +1,72 @@
-/**
- * ============================================================================
- * RESEARCH ACCUMULATOR UTILITY — Session-Scoped Search Result Cache
- * ============================================================================
- *
- * This utility provides a simple in-memory store for accumulating research
- * results across multiple tool calls within a single agent session.
- *
- * WHY THIS EXISTS:
- * ────────────────
- * The Appliances agent often makes several sequential web searches during a
- * single conversation turn (e.g., search → get details → find alternatives).
- * Each search returns valuable data, but the LLM's context window has limits.
- * The research accumulator lets tools store their results in a session-keyed
- * map so that later tools (or a future conversation turn) can access earlier
- * findings without re-searching.
- *
- * For example:
- *   1. `search_appliances` finds 5 washing machines → stored in accumulator
- *   2. `compare_appliances` can reference those results when building its
- *      comparison table, avoiding duplicate API calls
- *
- * DATA MODEL:
- * - **Key**: Session ID (typically the LangGraph `thread_id`)
- * - **Value**: Array of `ResearchEntry` objects, each with:
- *   - `query` — The original search query
- *   - `timestamp` — When the search was performed (epoch ms)
- *   - `results` — The raw result data (any shape, tool-dependent)
- *
- * LIFECYCLE:
- * - `addResearch(sessionId, query, results)` — Append a new entry
- * - `getResearch(sessionId)` — Retrieve all entries for a session
- * - `clearResearch(sessionId)` — Clean up after session ends
- *
- * NOTE: This is an in-memory store — data is lost on process restart.
- * For production use, consider replacing with Redis or a persistent cache.
- * ============================================================================
- */
+import * as fs from 'fs';
+import * as path from 'path';
+import { LogColors, color256 } from '../../../utils/log-colors.util';
+import { TavilyResult } from './tavily-client.util';
 
-interface ResearchEntry {
-    query: string;
-    timestamp: number;
-    results: any[];
+const TAG = `${color256(214)}[research-accumulator]${LogColors.RESET}`;
+const RESEARCH_FILENAME = 'research-data.json';
+
+/** Max characters to keep from each result's content in the truncated version returned to the LLM. */
+const TRUNCATED_CONTENT_LENGTH = 200;
+/** Max number of results to keep in the truncated version returned to the LLM. */
+const TRUNCATED_MAX_RESULTS = 6;
+
+export interface ResearchEntry {
+    toolName: string;
+    timestamp: string;
+    params: Record<string, any>;
+    answer?: string;
+    results: TavilyResult[];
 }
 
-const researchStore: Map<string, ResearchEntry[]> = new Map();
-
 /**
- * Add a research entry to the session's accumulator.
+ * Append full research data to the research file on disk, and return a
+ * truncated version suitable for the LLM conversation context.
  *
- * @param sessionId - Unique session/thread identifier.
- * @param query - The search query that produced these results.
- * @param results - The raw search results to store.
+ * Full results (with complete content) go to `{outputDir}/research-data.json`.
+ * The LLM only sees a compact summary: the answer + trimmed snippets.
  */
-export function addResearch(sessionId: string, query: string, results: any[]): void {
-    if (!researchStore.has(sessionId)) {
-        researchStore.set(sessionId, []);
-    }
-    researchStore.get(sessionId)!.push({
-        query,
-        timestamp: Date.now(),
+export function accumulateResearch(
+    outputDir: string,
+    toolName: string,
+    params: Record<string, any>,
+    answer: string | undefined,
+    results: TavilyResult[],
+): { truncatedAnswer: string | undefined; truncatedResults: TavilyResult[] } {
+    // --- 1. Save full data to file (append) ---
+    const filePath = path.join(outputDir, RESEARCH_FILENAME);
+    let existing: ResearchEntry[] = [];
+    try {
+        if (fs.existsSync(filePath)) {
+            existing = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        }
+    } catch { /* start fresh */ }
+
+    const entry: ResearchEntry = {
+        toolName,
+        timestamp: new Date().toISOString(),
+        params,
+        answer,
         results,
-    });
-}
+    };
+    existing.push(entry);
 
-/**
- * Retrieve all research entries for a given session.
- *
- * @param sessionId - Unique session/thread identifier.
- * @returns Array of `ResearchEntry` objects, or empty array if none.
- */
-export function getResearch(sessionId: string): ResearchEntry[] {
-    return researchStore.get(sessionId) || [];
-}
+    fs.mkdirSync(outputDir, { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf-8');
 
-/**
- * Clear all research data for a given session (cleanup).
- *
- * @param sessionId - Unique session/thread identifier.
- */
-export function clearResearch(sessionId: string): void {
-    researchStore.delete(sessionId);
+    const totalEntries = existing.length;
+    const totalResults = existing.reduce((sum, e) => sum + e.results.length, 0);
+    console.log(`${TAG} Saved to ${RESEARCH_FILENAME} (${totalEntries} entries, ${totalResults} total results)`);
+
+    // --- 2. Return truncated version for the LLM context ---
+    const truncatedResults = results.slice(0, TRUNCATED_MAX_RESULTS).map(r => ({
+        title: r.title,
+        url: r.url,
+        content: r.content.length > TRUNCATED_CONTENT_LENGTH
+            ? r.content.slice(0, TRUNCATED_CONTENT_LENGTH) + '…'
+            : r.content,
+        score: r.score,
+    }));
+
+    return { truncatedAnswer: answer, truncatedResults };
 }

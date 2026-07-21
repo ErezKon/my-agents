@@ -1,168 +1,134 @@
-/**
- * ============================================================================
- * TAVILY CLIENT UTILITY — Web Search & URL Extraction via Tavily API
- * ============================================================================
- *
- * This utility module wraps the Tavily REST API to provide two core
- * capabilities used by the Appliances agent's tools:
- *
- *   1. **tavilySearch()** — Performs a web search query and returns ranked
- *      results with titles, URLs, content snippets, and relevance scores.
- *      Optionally returns a synthesized "answer" paragraph from Tavily's
- *      AI-powered answer engine. Supports domain filtering (e.g., restrict
- *      to Israeli retail sites like zap.co.il, ksp.co.il).
- *
- *   2. **tavilyExtract()** — Given a list of URLs, fetches and extracts
- *      the raw text content from each page. Useful for deep-diving into a
- *      specific product page after discovering it via search.
- *
- * WHY TAVILY?
- * ───────────
- * The Appliances agent needs real-time product data (prices, specs, reviews)
- * from Israeli e-commerce sites. Tavily provides a clean search API that
- * returns structured results without the complexity of scraping. The
- * "advanced" search depth triggers Tavily's deep research mode, which
- * follows links and aggregates information — ideal for product comparison
- * queries.
- *
- * CONFIGURATION:
- * - `TAVILY_API_KEY` — Read from `process.env.TAVILY_API_KEY`. Falls back
- *   to a placeholder for development.
- * - `TAVILY_API_URL` — The Tavily REST API base URL.
- *
- * ERROR HANDLING:
- * Both functions catch all errors and return safe empty-result objects
- * instead of throwing. This is intentional — tool functions called by the
- * LLM agent must never crash the agent loop. Instead, the agent receives
- * an empty result and can decide to retry with different parameters or
- * inform the user.
- *
- * LOGGING:
- * Uses color256 ANSI codes for distinctive orange `[tavily-client]` log tags
- * so Tavily API calls are easily spotted in dense agent-loop console output.
- * ============================================================================
- */
-
+import * as fs from 'fs';
+import * as path from 'path';
+import * as crypto from 'crypto';
+import { fileURLToPath } from 'url';
 import { LogColors, color256 } from '../../../utils/log-colors.util';
 
-const TAG = `${color256(208)}[tavily-client]${LogColors.RESET}`;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TAVILY_SEARCH_URL = 'https://api.tavily.com/search';
+// Cache directory. Defaults to the agent's local cache folder, overridable via
+// TAVILY_CACHE_DIR (used by tests to avoid polluting the real cache).
+const CACHE_DIR = process.env.TAVILY_CACHE_DIR
+    ? path.resolve(process.env.TAVILY_CACHE_DIR)
+    : path.resolve(__dirname, '../cache');
+const TAG = `${color256(63)}[tavily-cache]${LogColors.RESET}`;
 
-const TAVILY_API_KEY = process.env.TAVILY_API_KEY || "tvly-dev-key-placeholder";
-const TAVILY_API_URL = "https://api.tavily.com";
-
-interface TavilySearchResult {
+export interface TavilyResult {
     title: string;
     url: string;
     content: string;
-    score: number;
+    score?: number;
 }
 
-interface TavilySearchResponse {
-    results: TavilySearchResult[];
+export interface TavilySearchOutput {
     answer?: string;
+    results: TavilyResult[];
+    images?: string[];
+    error?: string;
+    cached?: boolean;
 }
 
-interface TavilyExtractResponse {
-    results: {
-        url: string;
-        raw_content: string;
-    }[];
-    failed_results: {
-        url: string;
-        error: string;
-    }[];
+function cacheKey(query: string, options: Record<string, any>): string {
+    const payload = JSON.stringify({ query, ...options });
+    return crypto.createHash('sha256').update(payload).digest('hex');
+}
+
+function readCache(key: string): TavilySearchOutput | null {
+    const filePath = path.join(CACHE_DIR, `${key}.json`);
+    if (!fs.existsSync(filePath)) return null;
+    try {
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        return JSON.parse(raw) as TavilySearchOutput;
+    } catch {
+        return null;
+    }
+}
+
+function writeCache(key: string, data: TavilySearchOutput): void {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+    const filePath = path.join(CACHE_DIR, `${key}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
 }
 
 /**
- * Perform a web search via the Tavily Search API.
- *
- * @param query - The search query string (Hebrew or English).
- * @param options - Optional search configuration:
- *   - `searchDepth`: "basic" (fast, shallow) or "advanced" (deep research).
- *   - `maxResults`: Maximum number of results to return (default 5).
- *   - `includeAnswer`: Whether to request Tavily's AI-synthesized answer.
- *   - `includeDomains`: Restrict results to specific domains (e.g., Israeli retail sites).
- * @returns A `TavilySearchResponse` with results array and optional answer.
- *   Returns `{ results: [] }` on any error.
+ * Minimal Tavily Search REST client with file-based caching.
+ * Reads the API key from process.env.TAVILY_API_KEY.
  */
 export async function tavilySearch(
     query: string,
     options: {
-        searchDepth?: "basic" | "advanced";
         maxResults?: number;
+        searchDepth?: 'basic' | 'advanced';
         includeAnswer?: boolean;
+        includeImages?: boolean;
         includeDomains?: string[];
+        excludeDomains?: string[];
     } = {}
-): Promise<TavilySearchResponse> {
-    const {
-        searchDepth = "advanced",
-        maxResults = 5,
-        includeAnswer = true,
-        includeDomains = [],
-    } = options;
+): Promise<TavilySearchOutput> {
+    const resolvedOptions = {
+        searchDepth: options.searchDepth ?? 'advanced',
+        maxResults: options.maxResults ?? 6,
+        includeAnswer: options.includeAnswer ?? true,
+        includeImages: options.includeImages ?? false,
+        includeDomains: options.includeDomains ?? [],
+        excludeDomains: options.excludeDomains ?? [],
+    };
 
-    console.log(`${TAG} Search: "${query}" (depth=${searchDepth}, max=${maxResults})`);
-
-    try {
-        const response = await fetch(`${TAVILY_API_URL}/search`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                api_key: TAVILY_API_KEY,
-                query,
-                search_depth: searchDepth,
-                max_results: maxResults,
-                include_answer: includeAnswer,
-                include_domains: includeDomains.length > 0 ? includeDomains : undefined,
-            }),
-        });
-
-        if (!response.ok) {
-            const errText = await response.text();
-            console.log(`${TAG} ERROR: HTTP ${response.status} — ${errText}`);
-            return { results: [] };
-        }
-
-        const data = await response.json() as TavilySearchResponse;
-        console.log(`${TAG} Found ${data.results?.length ?? 0} results`);
-        return data;
-    } catch (err: any) {
-        console.log(`${TAG} ERROR: ${err.message}`);
-        return { results: [] };
+    const key = cacheKey(query, resolvedOptions);
+    const cachePath = path.join(CACHE_DIR, `${key}.json`);
+    console.log(`${TAG} query="${query}"`);
+    console.log(`${TAG} key=${key} path=${cachePath}`);
+    const cached = readCache(key);
+    if (cached) {
+        console.log(`${TAG} CACHE HIT`);
+        return { ...cached, cached: true };
     }
-}
+    console.log(`${TAG} CACHE MISS — calling Tavily API`);
 
-/**
- * Extract raw text content from one or more URLs via the Tavily Extract API.
- *
- * @param urls - Array of URLs to extract content from.
- * @returns A `TavilyExtractResponse` with successful and failed results.
- *   On network/API error, all URLs are reported as failed.
- */
-export async function tavilyExtract(urls: string[]): Promise<TavilyExtractResponse> {
-    console.log(`${TAG} Extract: ${urls.length} URL(s)`);
+    const apiKey = process.env.TAVILY_API_KEY;
+    if (!apiKey) {
+        return { results: [], error: 'TAVILY_API_KEY is not configured in the environment.' };
+    }
 
     try {
-        const response = await fetch(`${TAVILY_API_URL}/extract`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
+        const response = await fetch(TAVILY_SEARCH_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${apiKey}`,
+            },
             body: JSON.stringify({
-                api_key: TAVILY_API_KEY,
-                urls,
+                query,
+                search_depth: resolvedOptions.searchDepth,
+                max_results: resolvedOptions.maxResults,
+                include_answer: resolvedOptions.includeAnswer,
+                include_images: resolvedOptions.includeImages,
+                include_domains: resolvedOptions.includeDomains,
+                exclude_domains: resolvedOptions.excludeDomains,
             }),
         });
 
         if (!response.ok) {
-            const errText = await response.text();
-            console.log(`${TAG} ERROR: HTTP ${response.status} — ${errText}`);
-            return { results: [], failed_results: urls.map(u => ({ url: u, error: "HTTP error" })) };
+            const text = await response.text().catch(() => '');
+            return { results: [], error: `Tavily request failed: ${response.status} ${response.statusText} ${text}` };
         }
 
-        const data = await response.json() as TavilyExtractResponse;
-        console.log(`${TAG} Extracted ${data.results?.length ?? 0}, failed ${data.failed_results?.length ?? 0}`);
-        return data;
+        const data: any = await response.json();
+        const results: TavilyResult[] = (data.results || []).map((r: any) => ({
+            title: r.title,
+            url: r.url,
+            content: r.content,
+            score: r.score,
+        }));
+
+        const images: string[] = Array.isArray(data.images)
+            ? data.images.map((img: any) => typeof img === 'string' ? img : img?.url).filter(Boolean)
+            : [];
+        const output: TavilySearchOutput = { answer: data.answer, results, ...(images.length ? { images } : {}) };
+        writeCache(key, output);
+        console.log(`${TAG} Saved to cache (key=${key.slice(0, 12)}, ${results.length} results)`);
+        return output;
     } catch (err: any) {
-        console.log(`${TAG} ERROR: ${err.message}`);
-        return { results: [], failed_results: urls.map(u => ({ url: u, error: err.message })) };
+        return { results: [], error: `Tavily request error: ${err.message}` };
     }
 }

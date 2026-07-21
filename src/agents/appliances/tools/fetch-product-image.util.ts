@@ -1,67 +1,126 @@
-/**
- * ============================================================================
- * FETCH PRODUCT IMAGE UTILITY — Download Appliance Images from the Web
- * ============================================================================
- *
- * This utility provides a single async function for downloading product images
- * from external URLs and returning them as Node.js `Buffer` objects.
- *
- * PURPOSE:
- * ────────
- * When the Appliances agent finds product listings on Israeli retail sites,
- * those listings often include product image URLs. This utility fetches those
- * images so they can be:
- *   - Embedded in exported PDF/Excel comparison documents
- *   - Sent to a vision model for visual product analysis
- *   - Displayed in a frontend chat UI alongside product details
- *
- * DESIGN DECISIONS:
- * - **10-second timeout**: Product image servers can be slow; 10s is generous
- *   but prevents hanging indefinitely on unreachable hosts.
- * - **Custom User-Agent**: Uses a descriptive UA string to avoid bot-blocking
- *   by retail sites that reject default `fetch` UA strings.
- * - **Null on failure**: Returns `null` instead of throwing on any error
- *   (HTTP errors, timeouts, network failures). This is safe for tool-chain
- *   usage — the caller can simply skip the image if it fails.
- * - **Buffer output**: Returns a raw `Buffer` which can be base64-encoded
- *   for LLM vision APIs or written directly to disk for exports.
- *
- * LOGGING:
- * Uses color256 ANSI code 135 (purple) for `[fetch-product-image]` log tags
- * to distinguish image-fetch logs from search/extract logs in console output.
- * ============================================================================
- */
-
+import * as fs from 'fs';
+import * as path from 'path';
 import { LogColors, color256 } from '../../../utils/log-colors.util';
+import { tavilySearch } from './tavily-client.util';
 
-const TAG = `${color256(135)}[fetch-product-image]${LogColors.RESET}`;
+const TAG = `${color256(51)}[product-image]${LogColors.RESET}`;
+
+/** Accepted image content-types and their file extensions. */
+const IMAGE_TYPES: Record<string, string> = {
+    'image/jpeg': '.jpg',
+    'image/png': '.png',
+};
+
+export interface ProductImage {
+    /** Remote URL of the image. */
+    url: string;
+    /** Local file path where the image was downloaded. */
+    localPath: string;
+    /** Image file buffer (for embedding in Excel / PDF). */
+    buffer: Buffer;
+}
 
 /**
- * Download an image from a URL and return it as a Buffer.
- *
- * @param imageUrl - The full URL of the product image to fetch.
- * @returns A `Buffer` containing the image data, or `null` on any failure.
+ * Sanitize a string for use as a filename.
  */
-export async function fetchProductImage(imageUrl: string): Promise<Buffer | null> {
+function safeFilename(s: string): string {
+    return s.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+}
+
+/**
+ * Download an image from a URL. Returns the buffer and detected extension,
+ * or null if the download fails or the response isn't an image.
+ */
+async function downloadImage(url: string): Promise<{ buffer: Buffer; ext: string } | null> {
     try {
-        console.log(`${TAG} Fetching: ${imageUrl.slice(0, 80)}...`);
-        const response = await fetch(imageUrl, {
-            headers: {
-                "User-Agent": "Mozilla/5.0 (compatible; ApplianceAgent/1.0)",
-            },
-            signal: AbortSignal.timeout(10000),
+        const res = await fetch(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ApplianceBot/1.0)' },
+            signal: AbortSignal.timeout(10_000),
         });
+        if (!res.ok) return null;
 
-        if (!response.ok) {
-            console.log(`${TAG} HTTP ${response.status}`);
-            return null;
-        }
+        const ct = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        const ext = IMAGE_TYPES[ct];
+        if (!ext) return null;
 
-        const buffer = Buffer.from(await response.arrayBuffer());
-        console.log(`${TAG} Downloaded ${Math.round(buffer.length / 1024)}KB`);
-        return buffer;
-    } catch (err: any) {
-        console.log(`${TAG} ERROR: ${err.message}`);
+        const arrayBuf = await res.arrayBuffer();
+        const buffer = Buffer.from(arrayBuf);
+        if (buffer.length < 2_000) return null; // skip tiny/broken images
+        return { buffer, ext };
+    } catch {
         return null;
     }
+}
+
+/**
+ * Search for a product image using Tavily, download the best match,
+ * and save it to the output directory.
+ *
+ * Returns a ProductImage or null if no usable image was found.
+ */
+export async function fetchProductImage(
+    brand: string,
+    model: string,
+    outputDir: string,
+): Promise<ProductImage | null> {
+    const query = `${brand} ${model} product photo official`;
+    console.log(`${TAG} Searching image for ${brand} ${model}`);
+
+    const { images, error } = await tavilySearch(query, {
+        maxResults: 3,
+        searchDepth: 'basic',
+        includeAnswer: false,
+        includeImages: true,
+    });
+
+    if (error || !images?.length) {
+        console.log(`${TAG} No images found for ${brand} ${model}`);
+        return null;
+    }
+
+    // Try each image URL until one downloads successfully
+    for (const url of images.slice(0, 5)) {
+        const result = await downloadImage(url);
+        if (!result) continue;
+
+        const imagesDir = path.join(outputDir, 'images');
+        fs.mkdirSync(imagesDir, { recursive: true });
+
+        const filename = `${safeFilename(brand)}-${safeFilename(model)}${result.ext}`;
+        const localPath = path.join(imagesDir, filename);
+        fs.writeFileSync(localPath, result.buffer);
+
+        console.log(`${TAG} Downloaded ${brand} ${model} → ${filename} (${(result.buffer.length / 1024).toFixed(0)} KB)`);
+        return { url, localPath, buffer: result.buffer };
+    }
+
+    console.log(`${TAG} All image URLs failed for ${brand} ${model}`);
+    return null;
+}
+
+/**
+ * Fetch images for multiple models in parallel.
+ * Returns a Map from "brand|model" key to ProductImage.
+ */
+export async function fetchAllProductImages(
+    models: { brand: string; model: string }[],
+    outputDir: string,
+): Promise<Map<string, ProductImage>> {
+    const map = new Map<string, ProductImage>();
+
+    const results = await Promise.allSettled(
+        models.map(async (m) => {
+            const img = await fetchProductImage(m.brand, m.model, outputDir);
+            return { key: `${m.brand}|${m.model}`, img };
+        })
+    );
+
+    for (const r of results) {
+        if (r.status === 'fulfilled' && r.value.img) {
+            map.set(r.value.key, r.value.img);
+        }
+    }
+
+    console.log(`${TAG} Fetched ${map.size}/${models.length} product images`);
+    return map;
 }

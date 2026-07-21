@@ -14,7 +14,7 @@
  * ARCHITECTURE (LangChain / LangGraph Concepts):
  * ------------------------------------------------
  * - **ChatOpenAI**: LangChain wrapper for an OpenAI-compatible chat model.
- *   Points to a Dell internal GenAI endpoint. temperature=0.5 gives the
+ *   Points to a OpenAI-compatible LLM endpoint. temperature=0.5 gives the
  *   chef a bit of creative variation in its responses.
  *
  * - **MemorySaver**: A LangGraph checkpointer that stores conversation state
@@ -74,11 +74,12 @@ import {RecipeSchema} from './recipies-db/schemas/recipe.schema';
 import {saveRecipeToDatabase} from './tools/save-recipe.tool';
 import {searchRecipeDatabase} from './tools/search-recipe.tool';
 import {convertImageToIngredients, createFoodRecognitionTool, createIngredientsRecognitionTool} from './tools/image-recognition.tool';
+import {LLM_BASE_URL} from '../../config';
 
 /**
  * Factory function that creates and returns a fully configured Chef agent.
  *
- * @param apiKey - API key for the Dell GenAI endpoint (OpenAI-compatible).
+ * @param apiKey - API key for the LLM endpoint (OpenAI-compatible).
  * @param imageBase64 - Optional base64-encoded image string. When provided,
  *   the image recognition tools are pre-loaded with this image so the LLM
  *   can call them without passing the image data as an argument.
@@ -95,14 +96,15 @@ export const createChefAgent = (apiKey: string, imageBase64?: string) => {
     // own OpenAI-compatible endpoint (e.g., local Ollama, vLLM, etc.).
     // temperature=0.5 gives the chef some creative variation while still
     // keeping responses grounded and coherent.
-    const ollamaModel = new ChatOpenAI({
-        model: "gpt-oss-120b",
+    const model = new ChatOpenAI({
+        model: 'gpt-oss-120b',
         temperature: 0.5,
         maxRetries: 3,
         timeout: 10000,
-        apiKey: "ApiKey here",
+        openAIApiKey: apiKey,
+        apiKey: apiKey,
         configuration: {
-            baseURL: "enter your address here"
+            baseURL: LLM_BASE_URL
         }
     });
 
@@ -123,7 +125,7 @@ export const createChefAgent = (apiKey: string, imageBase64?: string) => {
     //   - responseFormat (RecipeSchema) constraining the final output to structured JSON
     //   - The list of tools the LLM can invoke during its reasoning loop
     const chat = createAgent({
-        model: ollamaModel,
+        model,
         checkpointer,
         systemPrompt: chefSystemPrompt,
         responseFormat: RecipeSchema,
