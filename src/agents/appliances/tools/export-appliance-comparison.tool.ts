@@ -8,6 +8,7 @@ import PdfPrinter from 'pdfmake/src/printer';
 import { LogColors, color256 } from '../../../utils/log-colors.util';
 import { sanitizeFolderName } from '../../../utils/save-output-base';
 import { fetchAllProductImages, ProductImage } from './fetch-product-image.util';
+import {parseDimensionRange} from './extract-dimensions.util';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS_DIR = path.join(__dirname, '..', 'assets');
@@ -270,8 +271,32 @@ export function writePdf(filePath: string, category: string, models: z.infer<typ
 
 export const createExportApplianceComparisonTool = (outputDir: string) =>
     tool(
-        async ({ category, models, summary, recommendations }) => {
-            console.log(`${TAG} INPUT: category='${category}', models=${models.length}`);
+        async ({ category, models, summary, recommendations, requirements }) => {
+            console.log(`${TAG} INPUT: category='${category}', models=${models.length}, requirements='${requirements ?? '-'}'`);
+
+            // --- Final validation gate: filter models by dimension requirements ---
+            const widthRange = parseDimensionRange(requirements, 'width');
+            let validatedModels = models;
+            const exportRejected: string[] = [];
+
+            if (widthRange) {
+                console.log(`${TAG} VALIDATION: filtering by width ${widthRange.min}-${widthRange.max} cm`);
+                validatedModels = models.filter(m => {
+                    if (m.widthCm == null) {
+                        exportRejected.push(`${m.brand} ${m.model}: רוחב לא ידוע`);
+                        return false;
+                    }
+                    if (m.widthCm < widthRange.min || m.widthCm > widthRange.max) {
+                        exportRejected.push(`${m.brand} ${m.model}: רוחב ${m.widthCm} ס"מ מחוץ לטווח`);
+                        return false;
+                    }
+                    return true;
+                });
+                if (exportRejected.length > 0) {
+                    console.log(`${TAG} VALIDATION: rejected ${exportRejected.length} models at export gate:`);
+                    for (const r of exportRejected) console.log(`${TAG}   ✗ ${r}`);
+                }
+            }
 
             const recs: RecommendationSets = {
                 fromGivenBrands: recommendations?.fromGivenBrands ?? [],
@@ -280,9 +305,9 @@ export const createExportApplianceComparisonTool = (outputDir: string) =>
             };
             fs.mkdirSync(outputDir, { recursive: true });
 
-            // Fetch product images for all models in parallel
+            // Fetch product images for validated models in parallel
             console.log(`${TAG} Fetching product images...`);
-            const imageMap = await fetchAllProductImages(models, outputDir);
+            const imageMap = await fetchAllProductImages(validatedModels, outputDir);
 
             const base = sanitizeFolderName(category) || 'comparison';
             const excelPath = path.join(outputDir, `${base}-comparison.xlsx`);
@@ -291,7 +316,7 @@ export const createExportApplianceComparisonTool = (outputDir: string) =>
             const generated: { excelPath?: string; pdfPath?: string; warnings: string[] } = { warnings: [] };
 
             try {
-                await writeExcel(excelPath, category, models, summary, recs, imageMap);
+                await writeExcel(excelPath, category, validatedModels, summary, recs, imageMap);
                 generated.excelPath = excelPath;
                 console.log(`${TAG} OUTPUT: wrote Excel ${excelPath}`);
             } catch (err: any) {
@@ -300,7 +325,7 @@ export const createExportApplianceComparisonTool = (outputDir: string) =>
             }
 
             try {
-                await writePdf(pdfPath, category, models, summary, recs, imageMap);
+                await writePdf(pdfPath, category, validatedModels, summary, recs, imageMap);
                 generated.pdfPath = pdfPath;
                 console.log(`${TAG} OUTPUT: wrote PDF ${pdfPath}`);
             } catch (err: any) {
@@ -311,6 +336,9 @@ export const createExportApplianceComparisonTool = (outputDir: string) =>
             return JSON.stringify({
                 success: !!(generated.excelPath || generated.pdfPath),
                 category,
+                modelsIncluded: validatedModels.length,
+                modelsRejected: exportRejected.length,
+                rejectedDetails: exportRejected.length > 0 ? exportRejected : undefined,
                 excelPath: generated.excelPath,
                 pdfPath: generated.pdfPath,
                 imagesFound: imageMap.size,
@@ -320,7 +348,7 @@ export const createExportApplianceComparisonTool = (outputDir: string) =>
         {
             name: 'export_appliance_comparison',
             description:
-                'Generate comparison files (Excel .xlsx AND PDF) for one appliance category. Pass the compared models (with features, reliability, energy rating, price ILS, warranty, value-for-money), a Hebrew summary, and Hebrew recommendations. Returns the file paths. Call once per appliance category.',
+                'Generate comparison files (Excel .xlsx AND PDF) for one appliance category. Pass the compared models (with features, reliability, energy rating, price ILS, warranty, value-for-money), a Hebrew summary, and Hebrew recommendations. Returns the file paths. Call once per appliance category. IMPORTANT: pass the user\'s dimension requirements in `requirements` — models failing validation will be excluded from the output files.',
             schema: z.object({
                 category: z.string().describe('Appliance category in Hebrew (e.g. \'מקרר\')'),
                 models: z.array(ModelSchema).describe('Models to include in the comparison file'),
@@ -330,6 +358,7 @@ export const createExportApplianceComparisonTool = (outputDir: string) =>
                     fromAlternatives: z.array(z.string()).describe('Hebrew recommendations for the best models from alternative/competing brands'),
                     overallBest: z.array(z.string()).describe('Hebrew overall best recommendations combining both given brands and alternatives'),
                 }).optional().describe('Hebrew recommendations organized in three sets'),
+                requirements: z.string().optional().describe('User dimension/size requirements (e.g. \'רוחב 90-100 ס"מ\'). Final validation gate — models with null or out-of-range dimensions are excluded from the output files.'),
             }),
         }
     );
